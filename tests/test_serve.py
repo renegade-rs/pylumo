@@ -507,6 +507,7 @@ class TestServeMonitor(ServeTestCase):
         response, data = self.request("GET", "/api/status")
         self.assertEqual(response.status, 200)
         status = json.loads(data)
-        for key in ("model", "in_flight", "requests", "last", "system"):
+        for key in ("model", "models", "in_flight", "requests", "last", "system"):
             self.assertIn(key, status)
+        self.assertIn("lumo-lite", status["models"])
         self.assertIn("cpu_percent", status["system"])

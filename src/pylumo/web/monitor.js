@@ -75,8 +75,20 @@ async function refresh() {
     ]);
     records = history.requests;
     notice("");
-    $("model").textContent = status.model;
+    const models = status.models || [];
+    const activeModel = records[0]?.model ?? null;
+    const mbox = $("model");
+    mbox.replaceChildren();
+    models.forEach((m, i) => {
+      if (i) mbox.append(document.createTextNode(" · "));
+      const s = document.createElement("span");
+      s.textContent = m;
+      if (m === activeModel) s.className = "active";
+      mbox.append(s);
+    });
+    if (!models.length) mbox.textContent = "—";
     $("inflight").textContent = `${status.in_flight} in flight`;
+    $("model-sub").textContent = status.model;
     $("count").textContent = status.requests;
     const last = status.last;
     $("wall").textContent = secs(last?.timings?.wall_s);

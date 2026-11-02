@@ -18,6 +18,8 @@ button{cursor:pointer;background:#232836;color:inherit;border:1px solid #2a2f3a;
 .label{font-size:11px;color:#8b93a3;text-transform:uppercase;letter-spacing:.7px}
 .value{font-size:26px;font-weight:600;margin-top:3px;line-height:1.3}
 .small{font-size:12px;color:#8b93a3;margin-top:3px}
+#model{font-size:16px;font-weight:600;line-height:1.4}
+#model .active{color:#4ade80;font-weight:700}
 .workspace{display:grid;grid-template-columns:minmax(330px,38%) minmax(0,1fr);gap:0;border:1px solid #2a2f3a;border-radius:12px;overflow:hidden;min-height:380px}
 #requests{border-right:1px solid #2a2f3a;max-height:520px;overflow-y:auto}
 .request{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #212630;border-radius:0;background:transparent;padding:10px 14px}
@@ -37,7 +39,7 @@ footer{padding:14px 26px;color:#8b93a3;font-size:12px}
 <div id="error" role="status"></div>
 <form id="auth"><label for="apikey">API key</label> <input id="apikey" type="password" autocomplete="off" placeholder="Paste the server API key"> <button>Connect</button></form>
 <div class="cards">
-<div class="card"><div class="label">Model</div><div class="value" id="model">—</div><div class="small" id="inflight">Waiting for server</div></div>
+<div class="card"><div class="label">Model</div><div class="value" id="model">—</div><div class="small" id="inflight">Waiting for server</div><div class="small" id="model-sub">—</div></div>
 <div class="card"><div class="label">Requests kept</div><div class="value" id="count">—</div><div class="small" id="kept">Last 100 until restart</div></div>
 <div class="card"><div class="label">Last wall-clock</div><div class="value" id="wall">—</div><div class="small">Seconds, newest finished</div></div>
 <div class="card"><div class="label">Last decode</div><div class="value" id="speed">—</div><div class="small">tokens/s, excludes TTFT</div></div>

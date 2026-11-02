@@ -385,6 +385,7 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
         server = self.server
         self._send_json(200, {
             "model": server.model_label,
+            "models": [model.value for model in LumoModel],
             "in_flight": server.metrics.count_active(),
             "requests": len(server.metrics.records),
             "last": server.metrics.last_finished(),

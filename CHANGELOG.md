@@ -6,7 +6,8 @@ All notable changes to this project will be documented in this file.
 ### Added
 - API monitor page (`GET /` and `GET /monitor.js`, served without auth) modeled on
   the Strata monitor: per-request token usage and timings (time to first token,
-  wall-clock, decode tokens/s, prefill tokens/s), live CPU/memory, and GPU usage.
+  wall-clock, decode tokens/s, prefill tokens/s), the served model catalog (highlighting the active model), and live
+  CPU/memory and GPU usage.
 - Authenticated monitor data endpoints `GET /api/requests` and `GET /api/status`
   (Bearer key), backed by a thread-safe bounded request-metrics deque so the last
   100 requests survive a server restart.

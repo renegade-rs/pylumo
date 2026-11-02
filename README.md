@@ -13,6 +13,10 @@
 
 A Python client and terminal UI for the [Proton Lumo](https://lumo.proton.me) AI assistant with end-to-end encryption. A blogpost about the pyLumo project can be found [here](https://mindgard.ai/blog/understanding-lumo-ai-assistant-announcing-pylumo).
 
+<p align="center">
+  <img src="docs/pylumo_monitor_screenshot.png" alt="Lumo API Monitor page" width="800">
+</p>
+
 ## Table of Contents
 
 - [Features](#features)
@@ -323,7 +327,8 @@ address set with `--addr`). The page itself is served without authentication; it
 asks you to paste the server API key once and keeps it in browser
 `sessionStorage`, then polls the authenticated `/api/requests` and `/api/status`
 endpoints for per-request token usage and timings (time to first token,
-wall-clock, decode tokens/s, prefill tokens/s) and live CPU, memory, and GPU
+wall-clock, decode tokens/s, prefill tokens/s), the served model catalog (highlighting the active model), and live
+CPU, memory, and GPU
 usage.
 
 ## Python API
