@@ -1,4 +1,4 @@
-# pyLumo
+# pylumo
 
 > **Fork notice:** this repository is a fork of
 > [Mindgard/pylumo](https://github.com/Mindgard/pylumo) by
@@ -22,6 +22,7 @@ A Python client and terminal UI for the [Proton Lumo](https://lumo.proton.me) AI
 - [Quick Start](#quick-start)
   - [Terminal UI](#terminal-ui)
   - [Command Line](#command-line)
+  - [Local API Server](#local-api-server)
 - [Python API](#python-api)
 - [Testing](#testing)
 - [Uninstall](#uninstall)
@@ -37,6 +38,7 @@ A Python client and terminal UI for the [Proton Lumo](https://lumo.proton.me) AI
 - **Proton authentication** with secure session storage in system keychain
 - **Guest mode** for unauthenticated access
 - **Tool support**: web search, weather, stocks, cryptocurrency
+- **Local API server** exposing Lumo via the OpenAI chat completions API
 
 ## Installation
 
@@ -150,6 +152,62 @@ Options:
   -u, --upload FILE       Upload a file with the request
 ```
 
+### Local API Server
+
+Starts a loopback HTTP server that exposes Lumo through the OpenAI chat
+completions API, compatible with any tool that speaks the OpenAI protocol
+(opencode, GitHub Copilot BYOK, Cursor, Continue, aider). Adapted from the
+`proton lumo serve` design in
+[major0/proton-utils](https://github.com/major0/proton-utils): same API key
+format (32 random bytes, hex-encoded), same endpoints, and the same startup
+banner posture (the key is printed once to stderr and persisted with mode
+0600).
+
+```bash
+# Start the server (guest mode unless a saved session is found)
+uv run pylumo-serve
+
+# Generate and persist a new API key, listen on a custom address
+uv run pylumo-serve --new-api-key --addr 127.0.0.1:8443
+
+# Enable Lumo's web_search tool by default
+uv run pylumo-serve --web-search
+```
+
+The API key is never accepted via argv (it stays out of the process list);
+it is read from the `LUMO_API_KEY` environment variable or the persisted key
+file. If neither exists, a new 64-char hex key is generated, persisted with
+mode 0600, and printed once to stderr at startup.
+
+**Server Options:**
+```
+pylumo-serve [OPTIONS]
+
+Options:
+  --addr ADDR           Listen address and port (default: 127.0.0.1:8443;
+                        overridable via env LUMO_ENDPOINT)
+  --new-api-key         Generate and persist a new API key
+  --tls-cert TLS_CERT   TLS certificate path
+  --tls-key TLS_KEY     TLS private key path
+  --web-search          Enable Lumo's web_search tool by default
+                        (overridable via env LUMO_WEB_SEARCH)
+```
+
+**Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/v1/chat/completions` | Chat completions (streaming SSE) |
+| GET | `/v1/models` | List available models |
+
+**Harness config** (opencode / GitHub Copilot BYOK / Cursor), same shape as
+proton-utils' docs:
+
+```json
+{"models": [{"title": "Lumo", "model": "lumo", "provider": "openai"}],
+ "openai": {"baseUrl": "http://127.0.0.1:8443/v1", "apiKey": "<your-api-key>"}}
+```
+
 ## Python API
 
 ```python
@@ -226,7 +284,7 @@ rm -rf .venv
 ### Message integrity failures
 
 - Streaming responses are authenticated with AES-GCM.
-- If integrity verification fails (e.g., invalid tag/ciphertext), pyLumo treats this as an integrity error: it stops processing further chunks and returns an explicit error.
+- If integrity verification fails (e.g., invalid tag/ciphertext), pylumo treats this as an integrity error: it stops processing further chunks and returns an explicit error.
 
 ### Local data storage
 
