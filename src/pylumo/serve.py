@@ -181,6 +181,60 @@ def resolve_model(requested) -> str:
     raise ValueError(f"Unknown model: {requested!r}")
 
 
+REASONING_FAST = "none"
+REASONING_THINKING = "high"
+FAST_EFFORTS = frozenset({"", "auto", "none", "off", "false"})
+
+
+def resolve_reasoning_effort(effort) -> str:
+    """Map a requested reasoning effort to one of Lumo's two reasoning modes.
+
+    Lumo offers Fast mode, which answers as quickly as possible, and
+    Thinking mode, which works through a request step by step before
+    answering. The API selects between them with the reasoning_effort
+    field, where "none" means Fast and any other level means Thinking, so
+    low, medium and high are equivalent rather than graded.
+
+    Args:
+        effort: Value from the request's reasoning_effort field
+            (None or "" for the provider default)
+
+    Returns:
+        REASONING_FAST for Fast mode or REASONING_THINKING for Thinking mode
+
+    Example:
+        >>> resolve_reasoning_effort("low") == REASONING_THINKING
+        True
+        >>> resolve_reasoning_effort(None) == REASONING_FAST
+        True
+    """
+    if effort is None or str(effort).strip().lower() in FAST_EFFORTS:
+        return REASONING_FAST
+    return REASONING_THINKING
+
+
+def extract_reasoning_effort(body: dict) -> str:
+    """Read the reasoning mode an OpenAI-compatible request asks for.
+
+    Accepts the reasoning_effort field and the Anthropic-style thinking
+    block some clients send instead. A request that names neither gets
+    Fast mode, matching the posture Lumo's own clients default to.
+
+    Args:
+        body: The parsed JSON request body
+
+    Returns:
+        REASONING_FAST for Fast mode or REASONING_THINKING for Thinking mode
+    """
+    effort = body.get("reasoning_effort")
+    if effort is not None and str(effort).strip():
+        return resolve_reasoning_effort(effort)
+    thinking = body.get("thinking")
+    if isinstance(thinking, dict) and thinking.get("type") not in (None, "", "disabled"):
+        return REASONING_THINKING
+    return REASONING_FAST
+
+
 def extract_tool_names(tools) -> list:
     """Extract known Lumo tool names from an OpenAI tools field.
 
@@ -314,10 +368,11 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
         if prompt is None:
             return
         tools = self._resolve_tools(body)
+        effort = extract_reasoning_effort(body)
         if body.get("stream"):
-            self._stream_chat(model, prompt, history, tools)
+            self._stream_chat(model, prompt, history, tools, effort)
         else:
-            self._complete_chat(model, prompt, history, tools)
+            self._complete_chat(model, prompt, history, tools, effort)
 
     def _split_messages(self, messages):
         """Split OpenAI messages into history turns and the new prompt."""
@@ -369,7 +424,7 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
         for turn in history:
             client.add_turn_to_history(turn["role"], turn["content"])
 
-    def _stream_chat(self, model, prompt, history, tools) -> None:
+    def _stream_chat(self, model, prompt, history, tools, effort) -> None:
         self._apply_history(history)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -383,6 +438,10 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
             if target == "message" and text:
                 self._write_sse(
                     self._chunk(chunk_id, model, {"content": text}))
+            elif target == "reasoning" and text:
+                self._write_sse(
+                    self._chunk(chunk_id, model,
+                                {"reasoning_content": text}))
 
         client = self.server.client
         error_msg = None
@@ -393,6 +452,7 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
                 targets=["message"],
                 model=model,
                 stream_callback=forward,
+                reasoning_effort=effort,
             )
         except Exception as e:
             result = {}
@@ -412,12 +472,13 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
         self._write_sse(self._chunk(chunk_id, model, {}, "stop"))
         self._write_sse("[DONE]")
 
-    def _complete_chat(self, model, prompt, history, tools) -> None:
+    def _complete_chat(self, model, prompt, history, tools, effort) -> None:
         self._apply_history(history)
         client = self.server.client
         try:
             result = client.send_request(
-                prompt, tools=tools, targets=["message"], model=model)
+                prompt, tools=tools, targets=["message"], model=model,
+                reasoning_effort=effort)
         except Exception as e:
             result = {"_error_details": str(e)}
         if not isinstance(result, dict) or not result or "_error" in result:
@@ -443,6 +504,10 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
                 "finish_reason": "stop",
             }],
         }
+        reasoning = result.get("reasoning")
+        if reasoning:
+            message = completion["choices"][0]["message"]
+            message["reasoning_content"] = reasoning
         usage = result.get("usage")
         if usage:
             try:

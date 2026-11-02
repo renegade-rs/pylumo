@@ -200,13 +200,87 @@ Options:
 | POST | `/v1/chat/completions` | Chat completions (streaming SSE) |
 | GET | `/v1/models` | List available models |
 
+**Reasoning Modes:**
+
+Lumo offers two reasoning modes, not a graded scale. **Fast** answers as
+quickly as possible; **Thinking** works through a request step by step before
+answering. The server picks between them with the OpenAI `reasoning_effort`
+field, where any level other than `none` means Thinking, so `low`, `medium`
+and `high` are equivalent. A request that names neither gets Fast, matching
+the posture Lumo's own clients default to.
+
+| Request | Mode | Sent to Lumo |
+|---------|------|--------------|
+| `"reasoning_effort": "low"` / `"medium"` / `"high"` | Thinking | `"high"` |
+| `{"thinking": {"type": "enabled"}}` | Thinking | `"high"` |
+| `"reasoning_effort": "none"` | Fast | `"none"` |
+| field absent | Fast | `"none"` |
+
+Thinking output is surfaced as `message.reasoning_content` (non-streaming) and
+`delta.reasoning_content` (streaming SSE).
+
+**Model and mode matrix** (from
+[Proton's guide to Lumo models and modes](https://proton.me/support/lumo-models)):
+
+| Task | Model | Mode |
+|------|-------|------|
+| Quick questions and lookups | `lumo-lite` | Fast |
+| General writing or editing | `lumo-lite` | Thinking |
+| Brainstorming and ideation | `lumo-max` | Fast |
+| Coding and technical tasks | `lumo-max` | Thinking |
+| Unsure | `lumo-max` | Fast |
+
+`apertus-15` is the fully open Swiss model. Its
+[technical report](https://huggingface.co/papers/2610.15542) describes thinking
+as a flag in the chat template rather than a separate model, so one set of
+weights serves both modes. Live requests confirm the two families differ in
+where the reasoning lands: Lumo Max and Lite return it as a separate channel,
+which the server surfaces as `reasoning_content`, while Apertus writes its
+chain of thought inline in `message.content`, so `reasoning_content` stays
+empty for that model.
+
 **Harness config** (opencode / GitHub Copilot BYOK / Cursor), same shape as
 proton-utils' docs:
 
 ```json
-{"models": [{"title": "Lumo", "model": "lumo", "provider": "openai"}],
+{"models": [{"title": "Lumo Max", "model": "lumo-max", "provider": "openai"}],
  "openai": {"baseUrl": "http://127.0.0.1:8443/v1", "apiKey": "<your-api-key>"}}
 ```
+
+For OpenCode, add the server as an OpenAI-compatible provider and declare
+reasoning support so variants are offered:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "lumo/apertus-15",
+  "providers": {
+    "lumo": {
+      "name": "Lumo",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "http://127.0.0.1:8443/v1",
+        "apiKey": "{env:LUMO_API_KEY}"
+      },
+      "models": {
+        "apertus-15": {
+          "modelID": "apertus-15",
+          "capabilities": {
+            "tools": true,
+            "input": ["text"],
+            "output": ["text"],
+            "reasoning": { "supported": true, "toggle": true, "effort": ["low", "high"] }
+          },
+          "compatibility": { "reasoningField": "reasoning_content" }
+        }
+      }
+    }
+  }
+}
+```
+
+Select a mode with `lumo/apertus-15#high` (Thinking) or `lumo/apertus-15#none`
+(Fast). Because Lumo's thinking is binary, `#low` and `#high` behave the same.
 
 ## Python API
 

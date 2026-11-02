@@ -18,7 +18,10 @@ from http.client import HTTPConnection
 from unittest import mock
 
 from pylumo.serve import (
+    REASONING_FAST,
+    REASONING_THINKING,
     LumoAPIServer,
+    extract_reasoning_effort,
     extract_text,
     extract_tool_names,
     generate_api_key,
@@ -26,6 +29,7 @@ from pylumo.serve import (
     parse_addr,
     resolve_api_key,
     resolve_model,
+    resolve_reasoning_effort,
 )
 
 TEST_KEY = "0" * 64
@@ -34,8 +38,9 @@ TEST_KEY = "0" * 64
 class FakeClient:
     """Stand-in for pyLumo that records calls and returns a canned reply."""
 
-    def __init__(self, reply="Hello from Lumo."):
+    def __init__(self, reply="Hello from Lumo.", reasoning=None):
         self.reply = reply
+        self.reasoning = reasoning
         self.calls = []
         self.history = []
         self.authenticated_mode = False
@@ -48,16 +53,19 @@ class FakeClient:
         self.history.append({"role": role, "content": content})
 
     def send_request(self, prompt, tools=None, targets=None, model=None,
-                     stream_callback=None):
+                     stream_callback=None, reasoning_effort=None):
         self.calls.append({
             "prompt": prompt,
             "tools": tools,
             "targets": targets,
             "model": model,
+            "reasoning_effort": reasoning_effort,
         })
         if stream_callback:
+            if self.reasoning:
+                stream_callback("reasoning", self.reasoning)
             stream_callback("message", self.reply)
-        return {"message": self.reply}
+        return {"message": self.reply, "reasoning": self.reasoning}
 
 
 class ServeTestCase(unittest.TestCase):
@@ -168,6 +176,29 @@ class TestServeHelpers(unittest.TestCase):
         with self.assertRaises(ValueError):
             resolve_model("gpt-99")
 
+    def test_resolve_reasoning_effort(self):
+        self.assertEqual(resolve_reasoning_effort("low"), REASONING_THINKING)
+        self.assertEqual(resolve_reasoning_effort("medium"), REASONING_THINKING)
+        self.assertEqual(resolve_reasoning_effort("HIGH"), REASONING_THINKING)
+        self.assertEqual(resolve_reasoning_effort("none"), REASONING_FAST)
+        self.assertEqual(resolve_reasoning_effort(None), REASONING_FAST)
+        self.assertEqual(resolve_reasoning_effort(""), REASONING_FAST)
+
+    def test_extract_reasoning_effort(self):
+        self.assertEqual(
+            extract_reasoning_effort({"reasoning_effort": "low"}),
+            REASONING_THINKING)
+        self.assertEqual(extract_reasoning_effort({}), REASONING_FAST)
+        self.assertEqual(
+            extract_reasoning_effort({"reasoning_effort": "none"}),
+            REASONING_FAST)
+        self.assertEqual(
+            extract_reasoning_effort({"thinking": {"type": "enabled"}}),
+            REASONING_THINKING)
+        self.assertEqual(
+            extract_reasoning_effort({"thinking": {"type": "disabled"}}),
+            REASONING_FAST)
+
     def test_extract_tool_names(self):
         tools = [
             {"type": "function", "function": {"name": "web_search"}},
@@ -264,6 +295,65 @@ class TestServeEndpoints(ServeTestCase):
         self.assertEqual(content, "Hello from Lumo.")
         self.assertEqual(
             chunks[-1]["choices"][0]["finish_reason"], "stop")
+
+    def test_chat_thinking_mode_forwarded(self):
+        body = {
+            "model": "apertus-15",
+            "messages": [{"role": "user", "content": "Prove it"}],
+            "reasoning_effort": "low",
+        }
+        response, data = self.request(
+            "POST", "/v1/chat/completions", body=body)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(self.client.calls[0]["model"], "apertus-15")
+        self.assertEqual(
+            self.client.calls[0]["reasoning_effort"], REASONING_THINKING)
+
+    def test_chat_fast_mode_is_the_default(self):
+        body = {
+            "model": "lumo-max",
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        response, data = self.request(
+            "POST", "/v1/chat/completions", body=body)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(
+            self.client.calls[0]["reasoning_effort"], REASONING_FAST)
+
+    def test_chat_reasoning_surfaced(self):
+        self.client.reasoning = "Step one."
+        body = {
+            "model": "lumo-max",
+            "messages": [{"role": "user", "content": "hi"}],
+            "reasoning_effort": "high",
+        }
+        response, data = self.request(
+            "POST", "/v1/chat/completions", body=body)
+        self.assertEqual(response.status, 200)
+        message = json.loads(data)["choices"][0]["message"]
+        self.assertEqual(message["reasoning_content"], "Step one.")
+        self.assertEqual(message["content"], "Hello from Lumo.")
+
+    def test_chat_streaming_reasoning_surfaced(self):
+        self.client.reasoning = "Thinking hard."
+        body = {
+            "model": "lumo-max",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            "reasoning_effort": "high",
+        }
+        response, data = self.request(
+            "POST", "/v1/chat/completions", body=body)
+        self.assertEqual(response.status, 200)
+        text = data.decode("utf-8")
+        events = [
+            line[len("data: "):] for line in text.splitlines()
+            if line.startswith("data: ") and line != "data: [DONE]"
+        ]
+        reasoning = "".join(
+            json.loads(event)["choices"][0]["delta"].get("reasoning_content", "")
+            for event in events)
+        self.assertEqual(reasoning, "Thinking hard.")
 
     def test_chat_content_parts(self):
         body = {
