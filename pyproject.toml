@@ -10,10 +10,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "GPL-3.0-or-later"}
 authors = [
-    {name = "ReNegadeR", email = "rs@rhodium.dscloud.me"},
+    {name = "renegade-rs", email = "rs@rhodium.dscloud.me"},
 ]
 maintainers = [
-    {name = "ReNegadeR", email = "rs@rhodium.dscloud.me"},
+    {name = "renegade-rs", email = "rs@rhodium.dscloud.me"},
 ]
 keywords = [
     "lumo",
@@ -81,10 +81,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Mindgard/pylumo"
-Documentation = "https://github.com/Mindgard/pylumo/blob/main/README.md"
-Repository = "https://github.com/Mindgard/pylumo"
-Issues = "https://github.com/Mindgard/pylumo/issues"
+Homepage = "https://github.com/renegade-rs/pylumo"
+Documentation = "https://github.com/renegade-rs/pylumo/blob/main/README.md"
+Repository = "https://github.com/renegade-rs/pylumo"
+Issues = "https://github.com/renegade-rs/pylumo/issues"
 ProtonAuth = "https://github.com/Arsylk/proton-auth"
 
 [project.scripts]

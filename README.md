@@ -2,7 +2,7 @@
 
 > **Fork notice:** this repository is a fork of
 > [Mindgard/pylumo](https://github.com/Mindgard/pylumo) by
-> [Mindgard](https://mindgard.ai), maintained by ReNegadeR
+> [Mindgard](https://mindgard.ai), maintained by renegade-rs
 > <rs@rhodium.dscloud.me>. Original authorship and the upstream project
 > remain credited to Mindgard; the project is licensed under
 > GPL-3.0-or-later.
@@ -49,7 +49,7 @@ for login/CAPTCHA delegation
 Clone the repository and use the Makefile:
 
 ```bash
-git clone git@github.com:Mindgard/pylumo.git
+git clone git@github.com:renegade-rs/pylumo.git
 cd pylumo
 
 # Install with TUI support (recommended)
@@ -237,6 +237,6 @@ GPL-3.0-or-later
 
 - [Blogpost - Understanding Lumo AI Assistant: Announcing pyLumo](http://mindgard.ai/blog/understanding-lumo-ai-assistant-announcing-pylumo)
 - [Proton Lumo](https://lumo.proton.me)
-- [GitHub Repository](https://github.com/Mindgard/pylumo)
+- [GitHub Repository](https://github.com/renegade-rs/pylumo) (this fork)
 - [Mindgard](https://mindgard.ai) (upstream of this fork)
 - [Arsylk/proton-auth](https://github.com/Arsylk/proton-auth) (external login/CAPTCHA solver, v0.2.0)
