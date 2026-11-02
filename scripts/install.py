@@ -83,6 +83,11 @@ User = _mod.User
         f.write(patched_content)
 
 
+# Version declared by the pinned proton-python-client source
+# (https://github.com/WugtheFlunk/proton-python-client main @ e03e626).
+PROTON_CLIENT_VERSION = "0.7.1"
+
+
 def install_proton_client(proton_ref: str, expected_commit: str | None) -> None:
     """Install proton-client with patched setup.py to avoid build errors"""
     print("=" * 60)
@@ -107,7 +112,7 @@ def install_proton_client(proton_ref: str, expected_commit: str | None) -> None:
                 "clone",
                 "--depth",
                 "1",
-                #"--branch",
+                "--branch",
                 proton_ref,
                 "https://github.com/WugtheFlunk/proton-python-client", #"https://github.com/ProtonMail/proton-python-client",
                 temp_dir,
@@ -142,7 +147,7 @@ def install_proton_client(proton_ref: str, expected_commit: str | None) -> None:
         # Replace the problematic import that causes SIGABRT
         content = content.replace(
             'from proton.constants import VERSION',
-            f'VERSION = "{proton_ref}"'
+            f'VERSION = "{PROTON_CLIENT_VERSION}"'
         )
         
         with open(setup_py_path, 'w') as f:
@@ -214,13 +219,13 @@ def main():
     parser.add_argument("--all", action="store_true", help="Install with all optional dependencies")
     parser.add_argument(
         "--proton-client-ref",
-        default="0.7.1",
-        help="Pinned proton-python-client git ref (tag/branch) to install (default: 0.7.1)",
+        default="main",
+        help="Pinned proton-python-client git ref (tag/branch) to install (default: main)",
     )
     parser.add_argument(
         "--proton-client-commit",
-        default=None,
-        help="Optional expected proton-python-client commit SHA to verify after clone",
+        default="e03e62688a70f0f35c725fc89cc5f14e1652b239",
+        help="Expected proton-python-client commit SHA to verify after clone (default: e03e626 on fork main)",
     )
     
     args = parser.parse_args()

@@ -61,7 +61,7 @@ make install
 
 The installer automatically handles all dependencies including the Proton Python client.
 
-Note: Proton account authentication depends on Proton's `proton-python-client`. It is intentionally installed via `scripts/install.py` (rather than as a normal python dependency) due to upstream build issues. The installer pins a specific git ref and prints the exact commit hash that was installed (currently `0.7.1`).
+Note: Proton account authentication depends on Proton's `proton-python-client`. It is intentionally installed via `scripts/install.py` (rather than as a normal python dependency) due to upstream build issues. The installer pins a specific git ref and prints the exact commit hash that was installed (currently `main` at `e03e626`, from the backup repository).
 
 ### Using uv
 
@@ -227,7 +227,7 @@ rm -rf .venv
 - The per-request AES key is encrypted to Proton/Lumo’s published PGP public key and sent alongside the request.
 - This protects prompt/response content against passive network observers and intermediaries; it does not protect against a compromised endpoint (your machine) or against the service itself once it decrypts.
 
-**Note:** The official [proton-python-client](https://github.com/ProtonMail/proton-python-client) module that pyLumo uses to authenticate to Proton's API only includes TLS pins for VPN endpoints. pyLumo [patches in the required pins](https://github.com/Mindgard/pylumo/blob/main/src/pylumo/pylumo.py#L33-L48) for `account.proton.me` at runtime to enable authentication with TLS pinning.
+**Note:** The [proton-python-client](https://github.com/WugtheFlunk/proton-python-client) module (backup of the now-404 ProtonMail original) that pyLumo uses to authenticate to Proton's API only includes TLS pins for VPN endpoints. pyLumo [patches in the required pins](https://github.com/Mindgard/pylumo/blob/main/src/pylumo/pylumo.py#L33-L48) for `account.proton.me` at runtime to enable authentication with TLS pinning.
 
 ## License
 
