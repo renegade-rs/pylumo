@@ -24,10 +24,12 @@ import os
 import secrets
 import ssl
 import sys
+import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from .metrics import STATE_COMPLETED, STATE_ERROR, Metrics
 from .pylumo import LumoModel, LumoTools, pyLumo
 
 __all__ = [
@@ -322,6 +324,14 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/v1/models":
             self._handle_models()
+        elif self.path in ("/", "/monitor.html"):
+            self._serve_asset("monitor.html", "text/html; charset=utf-8")
+        elif self.path == "/monitor.js":
+            self._serve_asset("monitor.js", "text/javascript; charset=utf-8")
+        elif self.path == "/api/requests":
+            self._handle_requests()
+        elif self.path == "/api/status":
+            self._handle_status()
         else:
             self._send_json(404, self._error("Unknown endpoint."))
 
@@ -345,6 +355,55 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
         ]
         self._send_json(200, {"object": "list", "data": data})
 
+    def _serve_asset(self, name: str, content_type: str) -> None:
+        try:
+            with open(
+                os.path.join(os.path.dirname(__file__), "web", name), "rb"
+            ) as f:
+                body = f.read()
+        except OSError:
+            self._send_json(404, self._error("Unknown endpoint."))
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _handle_requests(self) -> None:
+        if not self._check_auth():
+            return
+        server = self.server
+        self._send_json(200, {
+            "requests": server.metrics.snapshot(),
+            "updated_at": int(time.time() * 1000),
+        })
+
+    def _handle_status(self) -> None:
+        if not self._check_auth():
+            return
+        server = self.server
+        self._send_json(200, {
+            "model": server.model_label,
+            "in_flight": server.metrics.count_active(),
+            "requests": len(server.metrics.records),
+            "last": server.metrics.last_finished(),
+            "system": dict(server.system),
+        })
+
+    def _finish(self, record, state: str, result=None) -> None:
+        record.state = state
+        record.completed_at = time.time()
+        usage = result.get("usage") if isinstance(result, dict) else None
+        if isinstance(usage, str):
+            try:
+                usage = json.loads(usage)
+            except ValueError:
+                usage = None
+        if isinstance(usage, dict):
+            record.prompt_tokens = usage.get("prompt_tokens")
+            record.completion_tokens = usage.get("completion_tokens")
+
     def _handle_chat(self) -> None:
         if not self._check_auth():
             return
@@ -364,15 +423,17 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
         except ValueError as e:
             self._send_json(400, self._error(str(e)))
             return
+        record = self.server.metrics.begin(model, self.path)
         prompt, history = self._split_messages(body.get("messages"))
         if prompt is None:
+            self._finish(record, STATE_ERROR)
             return
         tools = self._resolve_tools(body)
         effort = extract_reasoning_effort(body)
         if body.get("stream"):
-            self._stream_chat(model, prompt, history, tools, effort)
+            self._stream_chat(model, prompt, history, tools, effort, record)
         else:
-            self._complete_chat(model, prompt, history, tools, effort)
+            self._complete_chat(model, prompt, history, tools, effort, record)
 
     def _split_messages(self, messages):
         """Split OpenAI messages into history turns and the new prompt."""
@@ -424,7 +485,8 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
         for turn in history:
             client.add_turn_to_history(turn["role"], turn["content"])
 
-    def _stream_chat(self, model, prompt, history, tools, effort) -> None:
+    def _stream_chat(self, model, prompt, history, tools, effort,
+                     record) -> None:
         self._apply_history(history)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -433,9 +495,12 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.close_connection = True
         chunk_id = f"chatcmpl-{uuid.uuid4()}"
+        record.id = chunk_id
 
         def forward(target, text):
             if target == "message" and text:
+                if record.first_token_at is None:
+                    record.first_token_at = time.time()
                 self._write_sse(
                     self._chunk(chunk_id, model, {"content": text}))
             elif target == "reasoning" and text:
@@ -464,15 +529,18 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
                 )
             if error_msg is None:
                 error_msg = "Lumo request failed."
+            self._finish(record, STATE_ERROR)
             self._write_sse(json.dumps({
                 "error": {"message": error_msg, "type": "server_error"},
             }))
             self._write_sse("[DONE]")
             return
         self._write_sse(self._chunk(chunk_id, model, {}, "stop"))
+        self._finish(record, STATE_COMPLETED, result)
         self._write_sse("[DONE]")
 
-    def _complete_chat(self, model, prompt, history, tools, effort) -> None:
+    def _complete_chat(self, model, prompt, history, tools, effort,
+                       record) -> None:
         self._apply_history(history)
         client = self.server.client
         try:
@@ -486,6 +554,7 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
                 message = result.get("_error_details") or "Lumo request failed."
             else:
                 message = "Lumo request failed."
+            self._finish(record, STATE_ERROR)
             self._send_json(502, {
                 "error": {"message": message, "type": "server_error"},
             })
@@ -514,6 +583,8 @@ class LumoAPIHandler(BaseHTTPRequestHandler):
                 completion["usage"] = json.loads(usage)
             except (json.JSONDecodeError, TypeError):
                 pass
+        record.id = completion["id"]
+        self._finish(record, STATE_COMPLETED, result)
         self._send_json(200, completion)
 
 
@@ -529,6 +600,50 @@ class LumoAPIServer(ThreadingHTTPServer):
         self.api_key = api_key
         self.client = client
         self.web_search = web_search
+        self.metrics = Metrics()
+        self.system = {
+            "cpu_percent": None,
+            "memory_percent": None,
+            "gpu_percent": None,
+            "gpu_updated_at": None,
+        }
+        self.model_label = f"http://{host}:{port}/v1"
+
+
+def _sample_system(server) -> None:
+    """Update server.system with CPU, memory, and GPU every 2 seconds.
+
+    GPU utilization comes from the small JSON file written by the
+    privileged sampler daemon; a missing or stale file means None,
+    which the monitor page renders as a dash.
+    """
+    try:
+        import psutil
+    except ImportError:
+        psutil = None
+    gpu_path = os.path.join(_config_dir(), "gpu.json")
+    if psutil is not None:
+        psutil.cpu_percent(interval=None)
+    while True:
+        system = {
+            "cpu_percent": None,
+            "memory_percent": None,
+            "gpu_percent": None,
+            "gpu_updated_at": None,
+        }
+        if psutil is not None:
+            system["cpu_percent"] = psutil.cpu_percent(interval=None)
+            system["memory_percent"] = psutil.virtual_memory().percent
+        try:
+            with open(gpu_path, encoding="utf-8") as f:
+                gpu = json.load(f)
+            if time.time() - gpu.get("updated_at", 0) <= 10:
+                system["gpu_percent"] = gpu.get("gpu_percent")
+                system["gpu_updated_at"] = gpu.get("updated_at")
+        except (OSError, ValueError, TypeError):
+            pass
+        server.system = system
+        time.sleep(2)
 
 
 def _print_banner(scheme, addr, api_key, cert_file) -> None:
@@ -623,6 +738,7 @@ def main() -> None:
         context.load_cert_chain(args.tls_cert, args.tls_key)
         server.socket = context.wrap_socket(server.socket, server_side=True)
     _print_banner(scheme, args.addr, api_key, args.tls_cert)
+    threading.Thread(target=_sample_system, args=(server,), daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

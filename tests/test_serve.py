@@ -38,9 +38,11 @@ TEST_KEY = "0" * 64
 class FakeClient:
     """Stand-in for pyLumo that records calls and returns a canned reply."""
 
-    def __init__(self, reply="Hello from Lumo.", reasoning=None):
+    def __init__(self, reply="Hello from Lumo.", reasoning=None,
+                 usage=None):
         self.reply = reply
         self.reasoning = reasoning
+        self.usage = usage
         self.calls = []
         self.history = []
         self.authenticated_mode = False
@@ -65,7 +67,11 @@ class FakeClient:
             if self.reasoning:
                 stream_callback("reasoning", self.reasoning)
             stream_callback("message", self.reply)
-        return {"message": self.reply, "reasoning": self.reasoning}
+        return {
+            "message": self.reply,
+            "reasoning": self.reasoning,
+            "usage": self.usage,
+        }
 
 
 class ServeTestCase(unittest.TestCase):
@@ -430,3 +436,77 @@ class TestServeWebSearchFlag(ServeTestCase):
             "POST", "/v1/chat/completions", body=body)
         self.assertEqual(response.status, 200)
         self.assertIn("web_search", self.client.calls[0]["tools"])
+
+
+class TestServeMonitor(ServeTestCase):
+    """Monitor page, request records, and status endpoints."""
+
+    def setUp(self):
+        self.client = FakeClient(
+            usage=json.dumps({"prompt_tokens": 9, "completion_tokens": 4})
+        )
+        self.make_server(client=self.client)
+
+    def test_root_serves_monitor_page_without_auth(self):
+        response, data = self.request("GET", "/", token=None)
+        self.assertEqual(response.status, 200)
+        self.assertIn("text/html", response.getheader("Content-Type"))
+        self.assertIn("Lumo API Monitor", data.decode("utf-8"))
+
+    def test_monitor_js_served_without_auth(self):
+        response, data = self.request("GET", "/monitor.js", token=None)
+        self.assertEqual(response.status, 200)
+        self.assertIn(
+            "javascript", response.getheader("Content-Type")
+        )
+
+    def test_data_endpoints_require_auth(self):
+        response, _ = self.request("GET", "/api/requests", token=None)
+        self.assertEqual(response.status, 401)
+        response, _ = self.request("GET", "/api/status", token=None)
+        self.assertEqual(response.status, 401)
+
+    def test_chat_record_appears_with_tokens(self):
+        body = {
+            "model": "lumo-lite",
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        self.request("POST", "/v1/chat/completions", body=body)
+        response, data = self.request("GET", "/api/requests")
+        records = json.loads(data)["requests"]
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["state"], "completed")
+        self.assertTrue(record["id"].startswith("chatcmpl-"))
+        self.assertEqual(record["usage"]["completion_tokens"], 4)
+        self.assertIsInstance(record["timings"]["wall_s"], float)
+
+    def test_streaming_record_has_first_token(self):
+        body = {
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        }
+        self.request("POST", "/v1/chat/completions", body=body)
+        response, data = self.request("GET", "/api/requests")
+        timings = json.loads(data)["requests"][0]["timings"]
+        self.assertIsInstance(timings["ttft_s"], float)
+        decode = timings["decode_tokens_s"]
+        self.assertTrue(decode is None or isinstance(decode, float))
+
+    def test_rejected_prompt_records_error(self):
+        response, _ = self.request(
+            "POST", "/v1/chat/completions", body={"messages": []}
+        )
+        self.assertEqual(response.status, 400)
+        response, data = self.request("GET", "/api/requests")
+        records = json.loads(data)["requests"]
+        self.assertEqual(records[0]["state"], "error")
+
+    def test_status_shape(self):
+        response, data = self.request("GET", "/api/status")
+        self.assertEqual(response.status, 200)
+        status = json.loads(data)
+        for key in ("model", "in_flight", "requests", "last", "system"):
+            self.assertIn(key, status)
+        self.assertIn("cpu_percent", status["system"])

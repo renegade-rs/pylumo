@@ -199,6 +199,10 @@ Options:
 |--------|------|-------------|
 | POST | `/v1/chat/completions` | Chat completions (streaming SSE) |
 | GET | `/v1/models` | List available models |
+| GET | `/` | Monitor page (no auth) |
+| GET | `/monitor.js` | Monitor page script (no auth) |
+| GET | `/api/requests` | Recent request records (Bearer key) |
+| GET | `/api/status` | Model, in-flight, and system metrics (Bearer key) |
 
 **Reasoning Modes:**
 
@@ -281,6 +285,46 @@ reasoning support so variants are offered:
 
 Select a mode with `lumo/apertus-15#high` (Thinking) or `lumo/apertus-15#none`
 (Fast). Because Lumo's thinking is binary, `#low` and `#high` behave the same.
+
+### Run in the background, stop, and monitor
+
+**Foreground.** The commands above run the server in the terminal. Stop it with
+`Ctrl-C` (SIGINT) or `kill <pid>` (SIGTERM).
+
+**Background service (launchd).** To start the server at login and restart it
+automatically, register it as a LaunchAgent whose `ProgramArguments` run your
+virtualenv's `pylumo-serve` (for example `.venv/bin/pylumo-serve --web-search`),
+with `RunAtLoad` and `KeepAlive` set to true. The server reads its API key from
+the persisted key file, so the key is never stored in the property list.
+
+```bash
+# Start (bootstrap) the server agent for the current GUI session
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/dev.renegade.pylumo.serve.plist
+# Stop (bootout) it
+launchctl bootout "gui/$(id -u)/dev.renegade.pylumo.serve"
+```
+
+GPU utilization is collected by a separate privileged sampler that runs
+`powermetrics` as a LaunchDaemon and writes a small JSON file the server reads.
+Because it runs as root, installing and removing it need `sudo`:
+
+```bash
+# Start the GPU sampler daemon
+sudo launchctl bootstrap system /Library/LaunchDaemons/dev.renegade.pylumo.gpu.plist
+# Stop it
+sudo launchctl bootout system/dev.renegade.pylumo.gpu
+```
+
+Without the sampler the monitor's GPU tile shows a dash; CPU and memory usage
+are always available.
+
+**Monitor page.** Open [http://127.0.0.1:8443/](http://127.0.0.1:8443/) (or the
+address set with `--addr`). The page itself is served without authentication; it
+asks you to paste the server API key once and keeps it in browser
+`sessionStorage`, then polls the authenticated `/api/requests` and `/api/status`
+endpoints for per-request token usage and timings (time to first token,
+wall-clock, decode tokens/s, prefill tokens/s) and live CPU, memory, and GPU
+usage.
 
 ## Python API
 
