@@ -28,6 +28,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from .pylumo import PROTON_API_URL
@@ -38,15 +39,18 @@ __all__ = [
     "session_dump_from_proton_auth",
 ]
 
-# Install guidance shown when the proton-auth binary is not on PATH.
+# Pinned proton-auth version: the Go module tag scripts/install.py builds from
+# (github.com/Arsylk/proton-auth). Change it here and in scripts/install.py.
+PROTON_AUTH_VERSION = "0.2.0"
+
+# Install guidance shown when the proton-auth binary is not found.
 PROTON_AUTH_INSTALL_HINT = (
     "proton-auth is not installed. It is an external, MIT-licensed Go tool "
     "(github.com/Arsylk/proton-auth) that performs Proton SRP login and "
     "transparently solves the CAPTCHA. Install one of:\n"
-    "  1) Download the prebuilt macOS binary for your architecture from "
-    "https://github.com/Arsylk/proton-auth/releases and place it on PATH, or\n"
-    "  2) Install Go 1.26+, then run: "
-    "go install github.com/Arsylk/proton-auth/cmd/proton-auth@latest"
+    "  1) python3 scripts/install.py  # builds the pinned version into ./bin\n"
+    "  2) Install Go 1.26+, then run: go install "
+    f"github.com/Arsylk/proton-auth/cmd/proton-auth@v{PROTON_AUTH_VERSION}"
 )
 
 # pyLumo's normal client identity (matches the vendored proton-python-client
@@ -92,6 +96,14 @@ def session_dump_from_proton_auth(result):
     for key in ("accessToken", "refreshToken", "uid"):
         if key not in result:
             raise ValueError(f"proton-auth result missing required key: {key!r}")
+    # proton-auth's documented JSON contract carries no scope field; the Proton
+    # client models Scope as a list of strings (proton/api.py builds it with
+    # auth_response["Scope"].split() and reads it with .get("Scope", [])), so an
+    # empty list is the faithful mapping. Normalize a string in case a future
+    # proton-auth ever emits one.
+    scope = result.get("scope", [])
+    if isinstance(scope, str):
+        scope = scope.split()
     return {
         "api_url": PROTON_API_URL,
         "appversion": _PYLUMO_APPVERSION,
@@ -100,7 +112,7 @@ def session_dump_from_proton_auth(result):
             "UID": result["uid"],
             "AccessToken": result["accessToken"],
             "RefreshToken": result["refreshToken"],
-            "Scope": [],
+            "Scope": scope,
             "PasswordMode": result.get("passwordMode"),
         },
     }
@@ -125,6 +137,9 @@ def proton_auth_session_file(username, password, totp=None, totp_secret=None,
     binary = _proton_auth_binary()
     if binary is None:
         raise RuntimeError(PROTON_AUTH_INSTALL_HINT)
+    # Transparency: show which binary is about to run with the credentials that
+    # get handed to it (search order: $PROTON_AUTH_BIN, project bin/, then PATH).
+    print(f"[proton-auth] binary: {binary}", file=sys.stderr)
 
     args = [binary, "-username", username, "-password-stdin"]
     # Keep the 2FA code/secret and the mailbox password out of argv (visible in

@@ -14,6 +14,7 @@ Tests cover:
 
 import unittest
 import base64
+import re
 import tempfile
 import os
 import sys
@@ -347,7 +348,6 @@ class TestPyLumoResponseParsing(unittest.TestCase):
                 raise_on_integrity_error=True,
             )
 
-
     def test_parse_tool_call_and_result(self):
         """Test tool_call accumulation and tool_result decryption."""
         mock_response = Mock()
@@ -511,7 +511,7 @@ class TestPyLumoSessionManagement(unittest.TestCase):
         mock_session.UID = "test-uid"
         mock_session.AccessToken = "test-token"
         mock_session.RefreshToken = "test-refresh"
-        mock_session.Scope = "full"
+        mock_session.Scope = ["full"]
         mock_session.PasswordMode = 1
         mock_session_class.return_value = mock_session
 
@@ -533,7 +533,6 @@ class TestPyLumoSessionManagement(unittest.TestCase):
 
         self.assertIsNone(self.client.proton_session)
         self.assertFalse(self.client.authenticated_mode)
-
 
     @patch("pylumo.pylumo.keyring")
     def test_save_session_expands_user(self, mock_keyring):
@@ -608,6 +607,23 @@ class TestPyLumoErrorHandling(unittest.TestCase):
             self.assertIn("Proton API client not available", str(context.exception))
 
 
+class TestProtonAuthSupplyChain(unittest.TestCase):
+    """Guard the pinned proton-auth version shared by the adapter and installer."""
+
+    def test_pinned_proton_auth_version_matches_installer(self):
+        """src/pylumo/proton_auth.py and scripts/install.py must pin one version."""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        adapter = os.path.join(root, "src", "pylumo", "proton_auth.py")
+        installer = os.path.join(root, "scripts", "install.py")
+        pins = []
+        for path in (adapter, installer):
+            with open(path, encoding="utf-8") as f:
+                match = re.search(r'^PROTON_AUTH_VERSION = "([^"]+)"', f.read(), re.M)
+            self.assertIsNotNone(match, f"{os.path.basename(path)} lost its pin")
+            pins.append(match.group(1))
+        self.assertEqual(pins[0], pins[1], "proton-auth version pin drifted")
+
+
 def run_tests():
     """Run all tests."""
     # Create test suite
@@ -623,6 +639,7 @@ def run_tests():
     suite.addTests(loader.loadTestsFromTestCase(TestPyLumoSessionManagement))
     suite.addTests(loader.loadTestsFromTestCase(TestPyLumoOutputFile))
     suite.addTests(loader.loadTestsFromTestCase(TestPyLumoErrorHandling))
+    suite.addTests(loader.loadTestsFromTestCase(TestProtonAuthSupplyChain))
 
     # Run tests
     runner = unittest.TextTestRunner(verbosity=2)
