@@ -1124,6 +1124,7 @@ class pyLumo:
         tools: Optional[List[str]] = None,
         targets: Optional[List[str]] = None,
         model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], bytes]:
         """Create encrypted request payload for Lumo API.
 
@@ -1132,6 +1133,8 @@ class pyLumo:
             tools: List of tool names to enable
             targets: List of response targets (e.g., ['title', 'message'])
             model: Model ID to use (see LumoModel); None defaults to "auto"
+            reasoning_effort: Reasoning mode to request; None defaults to
+                "none" (Fast mode). Any other value selects Thinking mode.
 
         Returns:
             Tuple of (payload dict, AES key bytes)
@@ -1255,7 +1258,7 @@ class pyLumo:
             "messages": turns,
             "stream": True,
             "stream_options": {"include_usage": True},
-            "reasoning_effort": "none",
+            "reasoning_effort": reasoning_effort or "none",
             "lumo": lumo_ext,
         }
         if tools:
@@ -1272,6 +1275,7 @@ class pyLumo:
         targets: Optional[List[str]] = None,
         stream_callback: Optional[Callable[[str, str], None]] = None,
         model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
     ) -> Dict[str, str]:
         """Send an encrypted request to the Lumo API.
 
@@ -1284,9 +1288,12 @@ class pyLumo:
             targets: Response targets to request (default: ["title", "message"])
             stream_callback: Optional callback function(target, chunk) for streaming
             model: Model ID to use (see LumoModel); None defaults to "auto"
+            reasoning_effort: Reasoning mode to request; None defaults to
+                "none" (Fast mode), any other value selects Thinking mode
 
         Returns:
-            Dictionary mapping target names to their response content
+            Dictionary mapping target names to their response content,
+            carrying a "reasoning" key when Thinking mode produced any
 
         Example:
             >>> client = pyLumo()
@@ -1297,7 +1304,7 @@ class pyLumo:
         self._auto_trim_history(prompt)
 
         payload, aes_key = self.create_request_payload(
-            prompt, tools, targets, model
+            prompt, tools, targets, model, reasoning_effort
         )
 
         try:

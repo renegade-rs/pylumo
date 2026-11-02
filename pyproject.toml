@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "GPL-3.0-or-later"}
 authors = [
+    {name = "Mindgard", email = "support@mindgard.ai"},
     {name = "renegade-rs", email = "rs@rhodium.dscloud.me"},
 ]
 maintainers = [
@@ -90,6 +91,7 @@ ProtonAuth = "https://github.com/Arsylk/proton-auth"
 [project.scripts]
 pylumo = "pylumo.pylumo:main"
 pylumo-tui = "pylumo.pylumo_tui:main"
+pylumo-serve = "pylumo.serve:main"
 
 [tool.hatch.version]
 path = "src/pylumo/__init__.py"
