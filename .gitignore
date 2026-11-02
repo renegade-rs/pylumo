@@ -205,3 +205,15 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Vendored external binaries (proton-auth CLI used by the CAPTCHA login adapter)
+bin/proton-auth
+
+# macOS Finder metadata (matches at root and in any subfolder)
+.DS_Store
+
+# OpenCode harness state
+.opencode/
+
+# ignore .github folder (matches at root and in any subfolder)
+.github/

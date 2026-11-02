@@ -1,5 +1,12 @@
 # pyLumo
 
+> **Fork notice:** this repository is a fork of
+> [Mindgard/pylumo](https://github.com/Mindgard/pylumo) by
+> [Mindgard](https://mindgard.ai), maintained by renegade-rs
+> <rs@rhodium.dscloud.me>. Original authorship and the upstream project
+> remain credited to Mindgard; the project is licensed under
+> GPL-3.0-or-later.
+
 <p align="center">
   <img src="src/pylumo/_purp_cat.png" alt="pyLumo" width="400">
 </p>
@@ -33,14 +40,16 @@ A Python client and terminal UI for the [Proton Lumo](https://lumo.proton.me) AI
 
 ## Installation
 
-**Requirements:** Python 3.12+, GnuPG
+**Requirements:** Python 3.12+, GnuPG, and the `proton-auth` binary
+(0.2.0, from [Arsylk/proton-auth](https://github.com/Arsylk/proton-auth))
+for login/CAPTCHA delegation
 
 ### Quick Install (Recommended)
 
 Clone the repository and use the Makefile:
 
 ```bash
-git clone git@github.com:Mindgard/pylumo.git
+git clone git@github.com:renegade-rs/pylumo.git
 cd pylumo
 
 # Install with TUI support (recommended)
@@ -52,7 +61,7 @@ make install
 
 The installer automatically handles all dependencies including the Proton Python client.
 
-Note: Proton account authentication depends on Proton's `proton-python-client`. It is intentionally installed via `scripts/install.py` (rather than as a normal python dependency) due to upstream build issues. The installer pins a specific git ref and prints the exact commit hash that was installed (currently `0.7.1`).
+Note: Proton account authentication depends on Proton's `proton-python-client`. It is intentionally installed via `scripts/install.py` (rather than as a normal python dependency) due to upstream build issues. The installer pins a specific git ref and prints the exact commit hash that was installed (currently `0.7.1`, `main` at `e03e626`, from the backup repository).
 
 ### Using uv
 
@@ -144,22 +153,34 @@ Options:
 ## Python API
 
 ```python
-from pylumo import pyLumo, LumoTools
+from pylumo import pyLumo, LumoTools, LumoModel, login_via_proton_auth
+from dotenv import find_dotenv, load_dotenv
+import os
 
-# Guest mode (no authentication)
+## Guest mode (no authentication)
 client = pyLumo()
 response = client.send_request("Hello, Lumo!")
 print(response["message"])
 
-# Authenticated mode
+## Authenticated mode
+## Load environment variables from .env file
+load_dotenv(find_dotenv(usecwd=True)) # Search upward from kernel CWD for the repo-root .env
+PROTON_USER_NAME = os.environ["PROTON_USER_NAME"] # can be username or user's email address
+PROTON_PW = os.environ["PROTON_PW"]
+PROTON_MAILBOX_PW = os.environ["PROTON_MAILBOX_PW"]
+
 client = pyLumo()
-client.authenticate_with_proton("user@proton.me", "password")
+login_via_proton_auth(client=client, 
+                      username=os.environ["PROTON_USER_NAME"],   
+                      password=PROTON_PW, 
+                      mailbox_password=PROTON_MAILBOX_PW) 
 client.save_session("~/.pylumo_session.json")
 
 # With tools enabled
 response = client.send_request(
-    "What's the weather in London?",
-    tools=[LumoTools.WEATHER, LumoTools.WEB_SEARCH]
+    "What's the weather in Auckland?",
+    tools=[LumoTools.WEATHER, LumoTools.WEB_SEARCH],
+    model=LumoModel.LUMO_LITE
 )
 ```
 
@@ -200,6 +221,7 @@ rm -rf .venv
 - TLS certificate pinning enabled by default (see note below)
 - All communication encrypted with AES-256-GCM
 - No sensitive data written to plain files
+- The login/CAPTCHA solver is built from source at a pinned version (see [docs/SUPPLY_CHAIN.md](docs/SUPPLY_CHAIN.md))
 
 ### Message integrity failures
 
@@ -218,7 +240,7 @@ rm -rf .venv
 - The per-request AES key is encrypted to Proton/Lumo’s published PGP public key and sent alongside the request.
 - This protects prompt/response content against passive network observers and intermediaries; it does not protect against a compromised endpoint (your machine) or against the service itself once it decrypts.
 
-**Note:** The official [proton-python-client](https://github.com/ProtonMail/proton-python-client) module that pyLumo uses to authenticate to Proton's API only includes TLS pins for VPN endpoints. pyLumo [patches in the required pins](https://github.com/Mindgard/pylumo/blob/main/src/pylumo/pylumo.py#L33-L48) for `account.proton.me` at runtime to enable authentication with TLS pinning.
+**Note:** The [proton-python-client](https://github.com/WugtheFlunk/proton-python-client) module (a backup of the now-404 ProtonMail original at v0.7.1 [proton-python-client](https://github.com/ProtonMail/proton-python-client)) that pylumo uses to authenticate to Proton's API only includes TLS pins for VPN endpoints. pylumo [patches in the required pins](https://github.com/Mindgard/pylumo/blob/main/src/pylumo/pylumo.py#L33-L48) for `account.proton.me` at runtime to enable authentication with TLS pinning.
 
 ## License
 
@@ -226,7 +248,9 @@ GPL-3.0-or-later
 
 ## Links
 
+- [Supply Chain - Pinned external builds](docs/SUPPLY_CHAIN.md)
 - [Blogpost - Understanding Lumo AI Assistant: Announcing pyLumo](http://mindgard.ai/blog/understanding-lumo-ai-assistant-announcing-pylumo)
 - [Proton Lumo](https://lumo.proton.me)
-- [GitHub Repository](https://github.com/Mindgard/pylumo)
-- [Mindgard](https://mindgard.ai)
+- [GitHub Repository](https://github.com/renegade-rs/pylumo) (this fork)
+- [Mindgard](https://mindgard.ai) (upstream of this fork)
+- [Arsylk/proton-auth](https://github.com/Arsylk/proton-auth) (external login/CAPTCHA solver, v0.2.0)

@@ -14,6 +14,7 @@ Tests cover:
 
 import unittest
 import base64
+import re
 import tempfile
 import os
 import sys
@@ -68,7 +69,7 @@ class TestPyLumoEncryption(unittest.TestCase):
         )
 
         # Get encrypted content from payload
-        encrypted_content = payload["Prompt"]["turns"][0]["content"]
+        encrypted_content = payload["messages"][0]["content"]
 
         # Verify content is encrypted (base64 encoded)
         self.assertTrue(len(encrypted_content) > 0)
@@ -81,7 +82,7 @@ class TestPyLumoEncryption(unittest.TestCase):
             prompt="test", tools=[], targets=["message"]
         )
 
-        request_key = payload["Prompt"]["request_key"]
+        request_key = payload["lumo"]["request_key"]
 
         # Should be base64-encoded PGP message
         self.assertTrue(len(request_key) > 0)
@@ -105,13 +106,12 @@ class TestPyLumoRequestPayload(unittest.TestCase):
             prompt="test prompt", tools=["web_search"], targets=["title", "message"]
         )
 
-        self.assertIn("Prompt", payload)
-        self.assertIn("type", payload["Prompt"])
-        self.assertIn("turns", payload["Prompt"])
-        self.assertIn("options", payload["Prompt"])
-        self.assertIn("targets", payload["Prompt"])
-        self.assertIn("request_id", payload["Prompt"])
-        self.assertIn("request_key", payload["Prompt"])
+        self.assertIn("model", payload)
+        self.assertIn("messages", payload)
+        self.assertIn("stream", payload)
+        self.assertIn("lumo", payload)
+        self.assertIn("request_id", payload["lumo"])
+        self.assertIn("request_key", payload["lumo"])
 
     def test_payload_tools(self):
         """Test tools are included in payload."""
@@ -120,7 +120,21 @@ class TestPyLumoRequestPayload(unittest.TestCase):
             prompt="test", tools=tools, targets=["message"]
         )
 
-        self.assertEqual(payload["Prompt"]["options"]["tools"], tools)
+        self.assertEqual(payload["tools"], [{"name": "web_search"}, {"name": "proton_info"}])
+
+    def test_payload_model(self):
+        """Test the selected model is included in the payload."""
+        payload, _ = self.client.create_request_payload(
+            prompt="test", tools=[], targets=["message"], model="lumo-max"
+        )
+        self.assertEqual(payload["model"], "lumo-max")
+
+    def test_payload_model_default_auto(self):
+        """Test model defaults to auto when not specified."""
+        payload, _ = self.client.create_request_payload(
+            prompt="test", tools=[], targets=["message"]
+        )
+        self.assertEqual(payload["model"], "auto")
 
     def test_payload_targets(self):
         """Test targets are included in payload."""
@@ -129,7 +143,7 @@ class TestPyLumoRequestPayload(unittest.TestCase):
             prompt="test", tools=[], targets=targets
         )
 
-        self.assertEqual(payload["Prompt"]["targets"], targets)
+        self.assertEqual(payload["lumo"]["target"], "message")
 
     def test_payload_turn_structure(self):
         """Test turn structure in payload."""
@@ -137,13 +151,13 @@ class TestPyLumoRequestPayload(unittest.TestCase):
             prompt="test prompt", tools=[], targets=["message"]
         )
 
-        turns = payload["Prompt"]["turns"]
-        self.assertEqual(len(turns), 1)
+        messages = payload["messages"]
+        self.assertEqual(len(messages), 1)
 
-        turn = turns[0]
-        self.assertEqual(turn["role"], "user")
-        self.assertTrue(turn["encrypted"])
-        self.assertIn("content", turn)
+        message = messages[0]
+        self.assertEqual(message["role"], "user")
+        self.assertTrue(message["encrypted"])
+        self.assertIn("content", message)
 
     def test_payload_with_conversation_history(self):
         """Test payload includes conversation history if present."""
@@ -158,8 +172,8 @@ class TestPyLumoRequestPayload(unittest.TestCase):
         )
 
         # Should have history + new turn
-        turns = payload["Prompt"]["turns"]
-        self.assertGreaterEqual(len(turns), 1)
+        messages = payload["messages"]
+        self.assertGreaterEqual(len(messages), 1)
 
     def test_request_id_is_uuid(self):
         """Test request_id is a valid UUID."""
@@ -167,7 +181,7 @@ class TestPyLumoRequestPayload(unittest.TestCase):
             prompt="test", tools=[], targets=["message"]
         )
 
-        request_id = payload["Prompt"]["request_id"]
+        request_id = payload["lumo"]["request_id"]
         # Should be a valid UUID format
         self.assertRegex(
             request_id,
@@ -205,9 +219,9 @@ class TestPyLumoResponseParsing(unittest.TestCase):
         enc_world = self._encrypt_response_chunk(aes_key, request_id, " World")
         mock_response.iter_lines = Mock(
             return_value=[
-                f'data:{{"type":"token_data","target":"message","count":0,"content":"{enc_hello}"}}'.encode("utf-8"),
-                f'data:{{"type":"token_data","target":"message","count":1,"content":"{enc_world}"}}'.encode('utf-8'),
-                b'data:{"type":"done","target":"message"}',
+                f'data:{{"object":"chat.completion.chunk","choices":[{{"index":0,"delta":{{"target":"message","content":"{enc_hello}","encrypted":true}}}}]}}'.encode("utf-8"),
+                f'data:{{"object":"chat.completion.chunk","choices":[{{"index":0,"delta":{{"target":"message","content":"{enc_world}","encrypted":true}}}}]}}'.encode('utf-8'),
+                b'data: [DONE]',
             ]
         )
 
@@ -233,10 +247,9 @@ class TestPyLumoResponseParsing(unittest.TestCase):
         enc_message = self._encrypt_response_chunk(aes_key, request_id, "Message")
         mock_response.iter_lines = Mock(
             return_value=[
-                f'data:{{"type":"token_data","target":"title","count":0,"content":"{enc_title}"}}'.encode('utf-8'),
-                f'data:{{"type":"token_data","target":"message","count":0,"content":"{enc_message}"}}'.encode('utf-8'),
-                b'data:{"type":"done","target":"title"}',
-                b'data:{"type":"done","target":"message"}',
+                f'data:{{"object":"chat.completion.chunk","choices":[{{"index":0,"delta":{{"target":"title","content":"{enc_title}","encrypted":true}}}}]}}'.encode('utf-8'),
+                f'data:{{"object":"chat.completion.chunk","choices":[{{"index":0,"delta":{{"target":"message","content":"{enc_message}","encrypted":true}}}}]}}'.encode('utf-8'),
+                b'data: [DONE]',
             ]
         )
 
@@ -261,8 +274,8 @@ class TestPyLumoResponseParsing(unittest.TestCase):
         mock_response.iter_lines = Mock(
             return_value=[
                 b"data:invalid json",
-                f'data:{{"type":"token_data","target":"message","count":0,"content":"{enc_valid}"}}'.encode('utf-8'),
-                b'data:{"type":"done","target":"message"}',
+                f'data:{{"object":"chat.completion.chunk","choices":[{{"index":0,"delta":{{"target":"message","content":"{enc_valid}","encrypted":true}}}}]}}'.encode('utf-8'),
+                b'data: [DONE]',
             ]
         )
 
@@ -292,9 +305,9 @@ class TestPyLumoResponseParsing(unittest.TestCase):
 
         mock_response.iter_lines = Mock(
             return_value=[
-                f'data:{{"type":"token_data","target":"message","count":0,"content":"{enc_hello}"}}'.encode('utf-8'),
-                f'data:{{"type":"token_data","target":"message","count":1,"content":"{enc_world_tampered}"}}'.encode('utf-8'),
-                b'data:{"type":"done","target":"message"}',
+                f'data:{{"object":"chat.completion.chunk","choices":[{{"index":0,"delta":{{"target":"message","content":"{enc_hello}","encrypted":true}}}}]}}'.encode('utf-8'),
+                f'data:{{"object":"chat.completion.chunk","choices":[{{"index":0,"delta":{{"target":"message","content":"{enc_world_tampered}","encrypted":true}}}}]}}'.encode('utf-8'),
+                b'data: [DONE]',
             ]
         )
 
@@ -322,7 +335,7 @@ class TestPyLumoResponseParsing(unittest.TestCase):
 
         mock_response.iter_lines = Mock(
             return_value=[
-                f'data:{{"type":"token_data","target":"message","count":0,"content":"{enc_tampered}"}}'.encode('utf-8'),
+                f'data:{{"object":"chat.completion.chunk","choices":[{{"index":0,"delta":{{"target":"message","content":"{enc_tampered}","encrypted":true}}}}]}}'.encode('utf-8'),
             ]
         )
 
@@ -334,6 +347,34 @@ class TestPyLumoResponseParsing(unittest.TestCase):
                 request_id,
                 raise_on_integrity_error=True,
             )
+
+    def test_parse_tool_call_and_result(self):
+        """Test tool_call accumulation and tool_result decryption."""
+        mock_response = Mock()
+        mock_response.raise_for_status = Mock()
+        mock_response.close = Mock()
+
+        request_id = "test-id"
+        _, aes_key = self.client.create_request_payload("test", [], ["message"])
+
+        enc_args = self._encrypt_response_chunk(aes_key, request_id, '{"city": "Paris"}')
+        enc_result = self._encrypt_response_chunk(aes_key, request_id, "Sunny 25C")
+        mock_response.iter_lines = Mock(
+            return_value=[
+                f'data:{{"object":"chat.tool_call","tool_call":{{"id":"call_0","name":"get_weather","arguments":"{enc_args}","encrypted":true}}}}'.encode("utf-8"),
+                f'data:{{"object":"chat.tool_result","tool_result":{{"call_id":"call_0","content":"{enc_result}","encrypted":true}}}}'.encode('utf-8'),
+                b'data: [DONE]',
+            ]
+        )
+
+        content_by_target, _ = self.client.parse_streaming_response(
+            mock_response, datetime.now(), aes_key, request_id
+        )
+
+        self.assertIn("tool_call", content_by_target)
+        self.assertIn('"name": "get_weather"', content_by_target["tool_call"])
+        self.assertIn("Paris", content_by_target["tool_call"])
+        self.assertEqual(content_by_target["tool_result"], "Sunny 25C")
 
 
 class TestPyLumoFileUpload(unittest.TestCase):
@@ -470,7 +511,7 @@ class TestPyLumoSessionManagement(unittest.TestCase):
         mock_session.UID = "test-uid"
         mock_session.AccessToken = "test-token"
         mock_session.RefreshToken = "test-refresh"
-        mock_session.Scope = "full"
+        mock_session.Scope = ["full"]
         mock_session.PasswordMode = 1
         mock_session_class.return_value = mock_session
 
@@ -492,6 +533,17 @@ class TestPyLumoSessionManagement(unittest.TestCase):
 
         self.assertIsNone(self.client.proton_session)
         self.assertFalse(self.client.authenticated_mode)
+
+    @patch("pylumo.pylumo.keyring")
+    def test_save_session_expands_user(self, mock_keyring):
+        """Test save_session expands ~ in filepath."""
+        self.client.proton_session = Mock()
+        self.client.proton_session.dump = Mock(return_value={})
+        self.client.proton_session.UID = "test-uid"
+        with tempfile.TemporaryDirectory() as home:
+            with patch.dict(os.environ, {"HOME": home}):
+                self.client.save_session("~/.pylumo_session.json")
+                self.assertTrue(os.path.exists(os.path.join(home, ".pylumo_session.json")))
 
 
 class TestPyLumoOutputFile(unittest.TestCase):
@@ -555,6 +607,23 @@ class TestPyLumoErrorHandling(unittest.TestCase):
             self.assertIn("Proton API client not available", str(context.exception))
 
 
+class TestProtonAuthSupplyChain(unittest.TestCase):
+    """Guard the pinned proton-auth version shared by the adapter and installer."""
+
+    def test_pinned_proton_auth_version_matches_installer(self):
+        """src/pylumo/proton_auth.py and scripts/install.py must pin one version."""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        adapter = os.path.join(root, "src", "pylumo", "proton_auth.py")
+        installer = os.path.join(root, "scripts", "install.py")
+        pins = []
+        for path in (adapter, installer):
+            with open(path, encoding="utf-8") as f:
+                match = re.search(r'^PROTON_AUTH_VERSION = "([^"]+)"', f.read(), re.M)
+            self.assertIsNotNone(match, f"{os.path.basename(path)} lost its pin")
+            pins.append(match.group(1))
+        self.assertEqual(pins[0], pins[1], "proton-auth version pin drifted")
+
+
 def run_tests():
     """Run all tests."""
     # Create test suite
@@ -570,6 +639,7 @@ def run_tests():
     suite.addTests(loader.loadTestsFromTestCase(TestPyLumoSessionManagement))
     suite.addTests(loader.loadTestsFromTestCase(TestPyLumoOutputFile))
     suite.addTests(loader.loadTestsFromTestCase(TestPyLumoErrorHandling))
+    suite.addTests(loader.loadTestsFromTestCase(TestProtonAuthSupplyChain))
 
     # Run tests
     runner = unittest.TextTestRunner(verbosity=2)

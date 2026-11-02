@@ -12,17 +12,23 @@ Usage:
     python3 install.py --all     # Install everything
 
 What it does:
-    1. Clones and patches proton-client to fix build errors
-    2. Installs the patched proton-client
-    3. Installs pylumo with your chosen extras
+    1. Builds the pinned proton-auth login/CAPTCHA solver from source
+    2. Clones and patches proton-client to fix build errors
+    3. Installs the patched proton-client
+    4. Installs pylumo with your chosen extras
 
 For more information, see INSTALL.md and KNOWN_ISSUES.md
 """
 import argparse
+import shutil
 import subprocess
 import sys
 import tempfile
 import os
+
+# Pinned proton-auth version: the Go module tag built by install_proton_auth().
+# Keep in sync with PROTON_AUTH_VERSION in src/pylumo/proton_auth.py.
+PROTON_AUTH_VERSION = "0.2.0"
 
 def _uv_subprocess_env():
     env = os.environ.copy()
@@ -83,6 +89,11 @@ User = _mod.User
         f.write(patched_content)
 
 
+# Version declared by the pinned proton-python-client source
+# (https://github.com/WugtheFlunk/proton-python-client main @ e03e626).
+PROTON_CLIENT_VERSION = "0.7.1"
+
+
 def install_proton_client(proton_ref: str, expected_commit: str | None) -> None:
     """Install proton-client with patched setup.py to avoid build errors"""
     print("=" * 60)
@@ -109,7 +120,7 @@ def install_proton_client(proton_ref: str, expected_commit: str | None) -> None:
                 "1",
                 "--branch",
                 proton_ref,
-                "https://github.com/ProtonMail/proton-python-client",
+                "https://github.com/WugtheFlunk/proton-python-client", #"https://github.com/ProtonMail/proton-python-client",
                 temp_dir,
             ],
             check=True,
@@ -142,7 +153,7 @@ def install_proton_client(proton_ref: str, expected_commit: str | None) -> None:
         # Replace the problematic import that causes SIGABRT
         content = content.replace(
             'from proton.constants import VERSION',
-            f'VERSION = "{proton_ref}"'
+            f'VERSION = "{PROTON_CLIENT_VERSION}"'
         )
         
         with open(setup_py_path, 'w') as f:
@@ -163,6 +174,60 @@ def install_proton_client(proton_ref: str, expected_commit: str | None) -> None:
             _patch_proton_srp_for_macos()
         
         print("[4/4] ✓ proton-client installed successfully\n")
+
+def install_proton_auth(version: str) -> None:
+    """Build the pinned proton-auth CLI from source into ./bin.
+
+    Provenance comes from the Go module proxy and its checksum database, so no
+    prebuilt binary blob is ever vendored. The built CLI is copied into the
+    project's bin/ directory (which the proton_auth adapter searches before
+    PATH) and verified by running its own -version flag.
+    """
+    print("=" * 60)
+    print("Installing proton-auth (login/CAPTCHA solver)...")
+    print("=" * 60)
+
+    go = shutil.which("go")
+    if go is None:
+        print(f"Error: Go 1.26+ is required to build proton-auth v{version}.")
+        print("To install it:")
+        print("  brew install go")
+        print("Then re-run this script, or pass --skip-proton-auth to place")
+        print("the binary yourself.")
+        sys.exit(1)
+
+    print(f"\n[1/3] Building proton-auth@v{version} from source...")
+    result = subprocess.run(
+        [go, "install", f"github.com/Arsylk/proton-auth/cmd/proton-auth@v{version}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"Error building proton-auth: {result.stderr}")
+        sys.exit(1)
+
+    print("[2/3] Installing the built binary into ./bin...")
+    gopath = subprocess.run([go, "env", "GOPATH"], capture_output=True, text=True)
+    go_bin = os.path.join(
+        gopath.stdout.strip() or os.path.expanduser("~/go"), "bin",
+        "proton-auth.exe" if os.name == "nt" else "proton-auth",
+    )
+    if not os.path.isfile(go_bin):
+        print(f"Error: built binary not found at {go_bin}")
+        sys.exit(1)
+    bin_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin")
+    os.makedirs(bin_dir, exist_ok=True)
+    dest = os.path.join(bin_dir, os.path.basename(go_bin))
+    shutil.copyfile(go_bin, dest)
+    os.chmod(dest, 0o755)
+
+    print(f"[3/3] Verifying the binary reports v{version}...")
+    result = subprocess.run([dest, "-version"], capture_output=True, text=True)
+    if result.returncode != 0 or version not in f"{result.stdout}{result.stderr}":
+        print(f"Error: proton-auth -version did not report v{version}:")
+        print(result.stdout or result.stderr)
+        sys.exit(1)
+    print("✓ proton-auth installed and version-verified\n")
+
 
 def install_pylumo(extras=None):
     """Install pylumo with optional extras"""
@@ -214,13 +279,23 @@ def main():
     parser.add_argument("--all", action="store_true", help="Install with all optional dependencies")
     parser.add_argument(
         "--proton-client-ref",
-        default="0.7.1",
-        help="Pinned proton-python-client git ref (tag/branch) to install (default: 0.7.1)",
+        default="main",
+        help="Pinned proton-python-client git ref (tag/branch) to install (default: main)",
     )
     parser.add_argument(
         "--proton-client-commit",
-        default=None,
-        help="Optional expected proton-python-client commit SHA to verify after clone",
+        default="e03e62688a70f0f35c725fc89cc5f14e1652b239",
+        help="Expected proton-python-client commit SHA to verify after clone (default: e03e626 on fork main)",
+    )
+    parser.add_argument(
+        "--proton-auth-version",
+        default=PROTON_AUTH_VERSION,
+        help="Pinned proton-auth Go module version to build from source",
+    )
+    parser.add_argument(
+        "--skip-proton-auth",
+        action="store_true",
+        help="Skip building proton-auth (place the binary in ./bin or on PATH yourself)",
     )
     
     args = parser.parse_args()
@@ -242,10 +317,16 @@ def main():
         if args.dev:
             extras.append("dev")
     
-    # Step 1: Install proton-client with workaround
+    # Step 1: Build the pinned proton-auth login/CAPTCHA solver
+    if args.skip_proton_auth:
+        print("Skipping proton-auth build (--skip-proton-auth).")
+    else:
+        install_proton_auth(args.proton_auth_version)
+
+    # Step 2: Install proton-client with workaround
     install_proton_client(args.proton_client_ref, args.proton_client_commit)
-    
-    # Step 2: Install pylumo
+
+    # Step 3: Install pylumo
     install_pylumo(extras if extras else None)
     
     print("=" * 60)
