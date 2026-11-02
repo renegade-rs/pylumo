@@ -10,10 +10,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "GPL-3.0-or-later"}
 authors = [
-    {name = "Mindgard", email = "support@mindgard.ai"},
+    {name = "ReNegadeR", email = "rs@rhodium.dscloud.me"},
 ]
 maintainers = [
-    {name = "Mindgard", email = "support@mindgard.ai"},
+    {name = "ReNegadeR", email = "rs@rhodium.dscloud.me"},
 ]
 keywords = [
     "lumo",
@@ -54,6 +54,16 @@ dependencies = [
     "pyopenssl>=23.0.0",
 ]
 
+# Note: Proton API authentication depends on Proton's proton-python-client
+# (the `proton` package: proton.api, proton.constants, proton.utils). It is
+# intentionally not listed above (upstream build issues) and is installed by
+# scripts/install.py, which clones
+# https://github.com/WugtheFlunk/proton-python-client (fork of
+# https://github.com/ProtonMail/proton-python-client).
+# Login/CAPTCHA delegation additionally uses the external `proton-auth`
+# binary (currently 0.2.0), an MIT-licensed Go tool obtained from
+# https://github.com/Arsylk/proton-auth (see src/pylumo/proton_auth.py).
+
 [project.optional-dependencies]
 tui = [
     "textual>=0.47.0",
@@ -75,6 +85,7 @@ Homepage = "https://github.com/Mindgard/pylumo"
 Documentation = "https://github.com/Mindgard/pylumo/blob/main/README.md"
 Repository = "https://github.com/Mindgard/pylumo"
 Issues = "https://github.com/Mindgard/pylumo/issues"
+ProtonAuth = "https://github.com/Arsylk/proton-auth"
 
 [project.scripts]
 pylumo = "pylumo.pylumo:main"

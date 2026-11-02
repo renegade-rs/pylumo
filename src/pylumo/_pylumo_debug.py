@@ -478,6 +478,7 @@ class pyLumoDebug(pyLumo):
         tools: Optional[List[str]] = None,
         targets: Optional[List[str]] = None,
         stream_callback: Optional[Callable[[str, str], None]] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, str]:
         """Send request with debug output for authentication mode and statistics."""
 
@@ -539,7 +540,7 @@ class pyLumoDebug(pyLumo):
 
         # Create the request payload to show it in debug output
         payload, aes_key = self.create_request_payload(
-            prompt, tools, targets
+            prompt, tools, targets, model
         )
 
         # Show the request payload structure
@@ -553,7 +554,7 @@ class pyLumoDebug(pyLumo):
 
         # Show conversation history count
         history_count = (
-            len(payload.get("Prompt", {}).get("turns", [])) - 1
+            len(payload["messages"]) - 1
         )  # -1 for current message
         if history_count > 0:
             print(
@@ -562,19 +563,19 @@ class pyLumoDebug(pyLumo):
             )
 
         # Show targets
-        targets_list = payload.get("Prompt", {}).get("targets", [])
-        if targets_list:
-            print(f"\nTargets: {', '.join(targets_list)}", file=sys.stderr)
+        target = payload["lumo"]["target"]
+        if target:
+            print(f"\nTarget: {target}", file=sys.stderr)
 
         # Show payload structure (without showing encrypted content)
         print("\nPayload Structure:", file=sys.stderr)
         print(
-            f"  - Encrypted AES key (PGP): {len(payload.get('EncryptedKey', ''))} chars",
+            f"  - Encrypted AES key (PGP): {len(payload['lumo']['request_key'])} chars",
             file=sys.stderr,
         )
-        print(f"  - Request ID: {payload.get('RequestID', 'N/A')}", file=sys.stderr)
+        print(f"  - Request ID: {payload['lumo']['request_id']}", file=sys.stderr)
         print(
-            f"  - Number of turns: {len(payload.get('Prompt', {}).get('turns', []))}",
+            f"  - Number of turns: {len(payload['messages'])}",
             file=sys.stderr,
         )
         print("  - All messages encrypted: AES-256-GCM", file=sys.stderr)
@@ -608,6 +609,7 @@ class pyLumoDebug(pyLumo):
             tools,
             targets,
             stats_callback if stream_callback else None,
+            model,
         )
 
         # Print statistics after request completes

@@ -77,7 +77,7 @@ except ImportError:
 
 # Client Constants
 LUMO_BASE_URL = "https://lumo.proton.me"
-LUMO_API_URL = f"{LUMO_BASE_URL}/api/ai/v1/chat"
+LUMO_API_URL = "https://lumo-api.proton.me/api/ai/v1/chat/completions"
 # If Proton roll their key then we need to update this
 LUMO_GPG_PUBLIC_KEY = """-----BEGIN PGP PUBLIC KEY BLOCK-----
 xjMEaA9k7RYJKwYBBAHaRw8BAQdABaPA24xROahXs66iuekwPmdOpJbPE1a8A69r
@@ -147,6 +147,32 @@ class LumoTools(str, Enum):
     Allows Lumo to fetch current cryptocurrency prices,
     market caps, and trading data.
     """
+
+
+# Selectable Lumo AI models - Will need to be updated as Proton updates Lumo's model lineup
+class LumoModel(str, Enum):
+    """Selectable AI models for Lumo API requests.
+
+    The value is the model ID sent in the request body's `model` field.
+    Pick a model by passing a LumoModel (or its string) to the `model`
+    parameter in send_request().
+
+    Example:
+        >>> client.send_request("Prove that sqrt(2) is irrational",
+        ...                     model=LumoModel.LUMO_MAX)
+    """
+
+    AUTO = "auto"
+    """Route to the best backend model for the task (default, recommended)."""
+
+    LUMO_LITE = "lumo-lite"
+    """Lumo Lite - fast, efficient model for everyday tasks."""
+
+    LUMO_MAX = "lumo-max"
+    """Lumo Max - more capable model for complex reasoning and longer context."""
+
+    APERTUS_15 = "apertus-15"
+    """Apertus 1.5 - fully open, Swiss-made model."""
 
 
 # Message roles for conversation turns
@@ -486,10 +512,21 @@ class pyLumo:
 
         self.proton_session.api_request = capture_auth_response
 
-        # Authenticate
+        # Authenticate. Proton's human-verification CAPTCHA cannot be solved by this
+        # client: the old browser+paste-token path is dead (Proton never hands back a
+        # copyable token). If a CAPTCHA is required, fail loudly and point the user to
+        # the Arsylk/proton-auth adapter, login_via_proton_auth, which solves it.
         try:
             self.proton_session.authenticate(username, password)
         except Exception as e:
+            # Proton returns API code 9001 when a human-verification CAPTCHA is required.
+            if getattr(e, "code", None) == 9001 or "captcha" in str(e).lower():
+                raise ValueError(
+                    "Proton requires a human-verification CAPTCHA, which this client "
+                    "cannot solve. Use login_via_proton_auth(client, username, password) "
+                    "from pylumo.proton_auth, which delegates the CAPTCHA to the "
+                    "Arsylk/proton-auth solver."
+                ) from e
             raise ValueError(f"Authentication failed: {e}")
 
         # Check if 2FA is required by looking for 'twofactor' in scopes
@@ -566,6 +603,7 @@ class pyLumo:
             RuntimeError: If no active session exists
             IOError: If file cannot be written
         """
+        filepath = os.path.expanduser(filepath)
         if not self.proton_session:
             raise RuntimeError("No active Proton session to save")
 
@@ -654,6 +692,7 @@ class pyLumo:
             FileNotFoundError: If session file doesn't exist
             ValueError: If session data is invalid or missing from keychain
         """
+        filepath = os.path.expanduser(filepath)
         if not PROTON_API_AVAILABLE:
             raise RuntimeError(
                 "Proton API client not available. "
@@ -731,6 +770,7 @@ class pyLumo:
         Args:
             filepath: Path to the saved session file
         """
+        filepath = os.path.expanduser(filepath)
         if not os.path.exists(filepath):
             return
 
@@ -906,7 +946,7 @@ class pyLumo:
         the Lumo API. It handles session cookies and authorization headers automatically.
 
         Args:
-            endpoint: Lumo API endpoint (e.g., "/api/ai/v1/chat")
+            endpoint: Lumo API endpoint (e.g., "/api/ai/v1/chat/completions")
             jsondata: JSON data to send in the request body
             additional_headers: Additional headers to include
             method: HTTP method (get|post|put|delete|patch), auto-detected if None
@@ -944,8 +984,8 @@ class pyLumo:
         if fct is None:
             raise ValueError(f"Unknown method: {method}")
 
-        # Build full URL
-        full_url = LUMO_BASE_URL + endpoint
+        # Build full URL (base_url is already the full chat completions URL)
+        full_url = self.base_url
 
         # Prepare request kwargs
         request_kwargs = {
@@ -1083,6 +1123,7 @@ class pyLumo:
         prompt: str,
         tools: Optional[List[str]] = None,
         targets: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> Tuple[Dict[str, Any], bytes]:
         """Create encrypted request payload for Lumo API.
 
@@ -1090,6 +1131,7 @@ class pyLumo:
             prompt: User's message/prompt
             tools: List of tool names to enable
             targets: List of response targets (e.g., ['title', 'message'])
+            model: Model ID to use (see LumoModel); None defaults to "auto"
 
         Returns:
             Tuple of (payload dict, AES key bytes)
@@ -1098,6 +1140,8 @@ class pyLumo:
             tools = ["proton_info"]
         if targets is None:
             targets = ["title", "message"]
+        if model is None:
+            model = LumoModel.AUTO.value
 
         # Generate random values for each request
         aes_key = get_random_bytes(32)
@@ -1196,16 +1240,29 @@ class pyLumo:
         }
         turns.append(current_user_turn)
 
-        payload = {
-            "Prompt": {
-                "type": "generation_request",
-                "turns": turns,
-                "options": {"tools": tools},
-                "targets": targets,
-                "request_key": b64_body,
-                "request_id": request_id,
-            }
+        # Build the OpenAI-compatible chat completions body (ChatCompletionsRequest).
+        # The legacy {"Prompt": ...} schema is deprecated and the API rejects it with
+        # HTTP 400; the live endpoint expects model + messages + stream + a `lumo`
+        # extension carrying the U2L encryption params (request_key/request_id).
+        lumo_ext = {
+            "client_type": "frontend",
+            "target": "message",
+            "request_key": b64_body,
+            "request_id": request_id,
         }
+        payload = {
+            "model": model,
+            "messages": turns,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "reasoning_effort": "none",
+            "lumo": lumo_ext,
+        }
+        if tools:
+            # OpenAI shape: each built-in tool is a {"name": ...} object, not a bare
+            # string (the live API rejects a string array with HTTP 422).
+            payload["tools"] = [{"name": tool} for tool in tools]
+            payload["tool_choice"] = "auto"
         return payload, aes_key
 
     def send_request(
@@ -1214,6 +1271,7 @@ class pyLumo:
         tools: Optional[List[str]] = None,
         targets: Optional[List[str]] = None,
         stream_callback: Optional[Callable[[str, str], None]] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, str]:
         """Send an encrypted request to the Lumo API.
 
@@ -1225,6 +1283,7 @@ class pyLumo:
             tools: List of tool names to enable (default: ["proton_info"])
             targets: Response targets to request (default: ["title", "message"])
             stream_callback: Optional callback function(target, chunk) for streaming
+            model: Model ID to use (see LumoModel); None defaults to "auto"
 
         Returns:
             Dictionary mapping target names to their response content
@@ -1238,7 +1297,7 @@ class pyLumo:
         self._auto_trim_history(prompt)
 
         payload, aes_key = self.create_request_payload(
-            prompt, tools, targets
+            prompt, tools, targets, model
         )
 
         try:
@@ -1249,7 +1308,7 @@ class pyLumo:
             if self.authenticated_mode and self.proton_session:
                 # Use the lumo_api_request method (wraps Proton session)
                 response = self.lumo_api_request(
-                    endpoint="/api/ai/v1/chat",
+                    endpoint="/api/ai/v1/chat/completions",
                     jsondata=payload,
                     method="post",
                     stream=True,
@@ -1264,7 +1323,7 @@ class pyLumo:
                     timeout=30,
                 )
 
-            request_id_str = payload["Prompt"]["request_id"]
+            request_id_str = payload["lumo"]["request_id"]
             content_by_target, timestamps_by_target = self.parse_streaming_response(
                 response, request_start_time, aes_key, request_id_str, stream_callback
             )
@@ -1316,8 +1375,10 @@ class pyLumo:
     ) -> Tuple[Dict[str, str], Dict[str, List[datetime]]]:
         """Parse and decrypt streaming SSE response from Lumo API.
 
-        Processes Server-Sent Events (SSE) stream, decrypts each chunk using AES-GCM,
-        and accumulates content by target.
+        Processes the live OpenAI-shaped Server-Sent Events (SSE) stream from
+        /api/ai/v1/chat/completions, branching on each chunk's `object`
+        discriminator (chat.completion.chunk / chat.tool_call / chat.tool_result),
+        decrypts each encrypted field with AES-GCM, and accumulates content by target.
 
         Args:
             response: Streaming HTTP response object
@@ -1334,6 +1395,46 @@ class pyLumo:
 
         integrity_error: Optional[Exception] = None
 
+        # Response AEAD associated data (matches TypeScript: "lumo.response.{uuid}.chunk")
+        aead_data = f"lumo.response.{request_id}.chunk".encode("utf-8")
+
+        def decrypt_chunk(encrypted_b64: str) -> str:
+            # base64 -> iv(12) + ciphertext + tag(16), decrypt_and_verify with AES-GCM
+            decoded = base64.b64decode(encrypted_b64)
+            if len(decoded) < (12 + 16):
+                raise ValueError(
+                    f"Encrypted chunk too short: {len(decoded)} bytes"
+                )
+            iv = decoded[:12]
+            ciphertext = decoded[12:-16]
+            tag = decoded[-16:]
+            cipher = AES.new(aes_key, AES.MODE_GCM, nonce=iv)
+            cipher.update(aead_data)
+            return cipher.decrypt_and_verify(ciphertext, tag).decode("utf-8")
+
+        def accumulate(target: str, text: str, response_time: datetime) -> None:
+            if target not in content_by_target:
+                content_by_target[target] = ""
+                timestamps_by_target[target] = []
+            content_by_target[target] += text
+            timestamps_by_target[target].append(response_time)
+            # Call the stream callback for real-time updates (if provided)
+            if stream_callback and text:
+                stream_callback(target, text)
+
+        # Tool-call accumulator keyed by call id (matches TypeScript StreamProcessor Map)
+        tool_calls: Dict[str, Dict[str, str]] = {}
+
+        def render_tool_calls() -> str:
+            calls = [
+                {"id": c["id"], "name": c["name"], "arguments": c["arguments"]}
+                for c in tool_calls.values()
+                if c["name"]
+            ]
+            if not calls:
+                return ""
+            return json.dumps(calls[0]) if len(calls) == 1 else json.dumps(calls)
+
         try:
             response.raise_for_status()
             self._display_http_response_start(response)
@@ -1344,138 +1445,172 @@ class pyLumo:
                 self._display_streaming_line(line)
                 if not line or not line.strip():
                     continue
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8")
+                trimmed = line.strip()
 
-                if line.startswith(b"data:"):
-                    json_data = line[5:]
-                    try:
-                        data = json.loads(json_data)
-                        response_time = datetime.now()
+                # SSE comment lines carry lifecycle events (": queued", ": ingesting")
+                if trimmed.startswith(":"):
+                    comment = trimmed[1:].strip()
+                    if not self.quiet_mode:
+                        if comment == "queued":
+                            print("\\r⏳ Request queued...", end="", flush=True)
+                        elif comment == "ingesting":
+                            print("\\r🔄 Processing...", end="", flush=True)
+                    continue
 
-                        msg_type = data.get("type", "")
+                # Extract JSON payload: "data: {...}" prefix or bare "{...}" line
+                if trimmed.startswith("data:"):
+                    json_data = trimmed[5:].strip()
+                elif trimmed.startswith("{"):
+                    json_data = trimmed
+                else:
+                    continue
 
-                        # Handle different response message types
-                        if msg_type == ResponseMessageType.QUEUED.value:
-                            # Request is queued, waiting to be processed
+                if not json_data:
+                    continue
+
+                # [DONE] sentinel marks the end of the stream
+                if json_data == "[DONE]":
+                    if not self.quiet_mode:
+                        print()  # New line after streaming
+                    continue
+
+                try:
+                    data = json.loads(json_data)
+                    response_time = datetime.now()
+
+                    # Branch on the chunk's `object` discriminator (OpenAI shape)
+                    obj = data.get("object", "")
+
+                    if obj == "chat.tool_call":
+                        # Tool call declaration: {id, name, arguments?, encrypted}
+                        tc = data.get("tool_call", {})
+                        call_id = tc.get("id", "")
+                        if call_id not in tool_calls:
+                            tool_calls[call_id] = {
+                                "id": call_id,
+                                "name": "",
+                                "arguments": "",
+                            }
+                        acc = tool_calls[call_id]
+                        if tc.get("name"):
+                            acc["name"] = tc["name"]
+                        if tc.get("arguments"):
+                            args = tc["arguments"]
+                            if tc.get("encrypted"):
+                                args = decrypt_chunk(args)
+                            acc["arguments"] += args
+                        content_by_target["tool_call"] = render_tool_calls()
+
+                    elif obj == "chat.tool_result":
+                        # Tool result: {call_id, content, encrypted}
+                        tr = data.get("tool_result", {})
+                        content = tr.get("content", "")
+                        if content:
+                            if tr.get("encrypted"):
+                                content = decrypt_chunk(content)
+                            accumulate("tool_result", content, response_time)
+
+                    else:
+                        # chat.completion.chunk (or bare choices chunk)
+                        if data.get("error"):
+                            error = data["error"]
+                            error_msg = error.get("message", "Unknown error")
+                            content_by_target["_error"] = error_msg
                             if not self.quiet_mode:
-                                print("\r⏳ Request queued...", end="", flush=True)
+                                print(
+                                    f"\n\033[31mERROR:\033[0m Stream error: {error_msg}",
+                                    file=sys.stderr,
+                                    flush=True,
+                                )
+                            continue
 
-                        elif msg_type == ResponseMessageType.INGESTING.value:
-                            # Server is processing the request
-                            target = data.get("target", "unknown")
-                            if not self.quiet_mode:
-                                print(f"\r🔄 Processing ({target})...", end="", flush=True)
+                        if data.get("usage"):
+                            content_by_target["usage"] = json.dumps(data["usage"])
 
-                        elif msg_type == ResponseMessageType.DONE.value:
-                            # Generation completed successfully
-                            if not self.quiet_mode:
-                                print()  # New line after streaming
+                        choices = data.get("choices")
+                        if not choices:
+                            continue
 
-                        elif msg_type == ResponseMessageType.TIMEOUT.value:
-                            # Request timed out
+                        choice = choices[0]
+                        finish_reason = choice.get("finish_reason")
+                        if finish_reason == "content_filter":
                             if not self.quiet_mode:
-                                print("\n\033[33mWARNING:\033[0m Request timed out")
-                            content_by_target["_error"] = "timeout"
-
-                        elif msg_type == ResponseMessageType.ERROR.value:
-                            # An error occurred during generation
-                            if not self.quiet_mode:
-                                print("\n\033[31mERROR:\033[0m Generation error occurred")
-                            content_by_target["_error"] = "generation_error"
-
-                        elif msg_type == ResponseMessageType.REJECTED.value:
-                            # Request was rejected (e.g., policy violation)
-                            if not self.quiet_mode:
-                                print("\n\033[31mREJECTED:\033[0m Request was rejected")
-                            content_by_target["_error"] = "rejected"
-
-                        elif msg_type == ResponseMessageType.HARMFUL.value:
-                            # Content was flagged as potentially harmful
-                            if not self.quiet_mode:
-                                print("\n\033[31mHARMFUL:\033[0m Content flagged as potentially harmful")
+                                print(
+                                    "\n\033[31mHARMFUL:\033[0m Content flagged as potentially harmful"
+                                )
                             content_by_target["_error"] = "harmful_content"
+                            continue
 
-                        elif msg_type == ResponseMessageType.TOKEN_DATA.value:
-                            target = data.get("target", "unknown")
-                            encrypted_content = data.get("content", "")
+                        delta = choice.get("delta")
+                        if not delta:
+                            continue
 
-                            if encrypted_content:
-                                try:
-                                    decoded_content = base64.b64decode(
-                                        encrypted_content
-                                    )
-                                    if len(decoded_content) < (12 + 16):
-                                        raise ValueError(
-                                            f"Encrypted chunk too short: {len(decoded_content)} bytes"
-                                        )
-                                    iv = decoded_content[:12]
-                                    ciphertext = decoded_content[12:-16]
-                                    tag = decoded_content[-16:]
+                        # Target: delta.target ?? chunk.target ?? "message"
+                        target = delta.get("target") or data.get("target") or "message"
 
-                                    # Use the same AEAD format as JavaScript
-                                    # for response decryption
-                                    aead_data = (
-                                        f"lumo.response.{request_id}.chunk".encode(
-                                            "utf-8"
-                                        )
-                                    )
-
-                                    cipher_aes = AES.new(
-                                        aes_key, AES.MODE_GCM, nonce=iv
-                                    )
-                                    cipher_aes.update(aead_data)
-                                    decrypted_content = cipher_aes.decrypt_and_verify(
-                                        ciphertext, tag
-                                    ).decode("utf-8")
-                                except Exception as e:
-                                    integrity_error = e
-                                    content_by_target["_error"] = "integrity_error"
-                                    content_by_target["_error_details"] = str(e)
-                                    if not self.quiet_mode:
-                                        print(
-                                            "\n\033[31mINTEGRITY ERROR:\033[0m "
-                                            f"Response decryption failed: {e}",
-                                            file=sys.stderr,
-                                            flush=True,
-                                        )
-                                    try:
-                                        response.close()
-                                    except Exception:
-                                        pass
-                                    if raise_on_integrity_error:
-                                        raise LumoIntegrityError(
-                                            f"Response integrity verification failed: {e}"
-                                        )
-                                    break
-                            else:
-                                decrypted_content = ""
-
-                            if target not in content_by_target:
-                                content_by_target[target] = ""
-                                timestamps_by_target[target] = []
-
-                            content_by_target[target] += decrypted_content
-                            timestamps_by_target[target].append(response_time)
-
-                            # Call the stream callback if provided
-                            if (
-                                stream_callback
-                                and target == "message"
-                                and decrypted_content
-                            ):
-                                stream_callback(target, decrypted_content)
-
+                        content = delta.get("content")
+                        if isinstance(content, str) and content:
+                            if delta.get("encrypted"):
+                                content = decrypt_chunk(content)
+                            accumulate(target, content, response_time)
                             if target == "message" and not self.quiet_mode:
-                                print(decrypted_content, end="", flush=True)
+                                print(content, end="", flush=True)
 
-                    except json.JSONDecodeError:
-                        if not self.quiet_mode:
-                            print(
-                                f"\n\033[33mWARNING:\033[0m Could not parse JSON data: {json_data[:50]}..."
-                            )
-                        continue
+                        reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                        if isinstance(reasoning, str) and reasoning:
+                            if delta.get("encrypted"):
+                                reasoning = decrypt_chunk(reasoning)
+                            accumulate("reasoning", reasoning, response_time)
 
-                    if integrity_error is not None:
-                        break
+                        tool_call_deltas = delta.get("tool_calls")
+                        if isinstance(tool_call_deltas, list):
+                            for tcd in tool_call_deltas:
+                                fn = tcd.get("function", {})
+                                idx = tcd.get("index", 0)
+                                key = tcd.get("id") or f"call_{idx}"
+                                if key not in tool_calls:
+                                    tool_calls[key] = {
+                                        "id": key,
+                                        "name": "",
+                                        "arguments": "",
+                                    }
+                                acc = tool_calls[key]
+                                if fn.get("name"):
+                                    acc["name"] = fn["name"]
+                                if fn.get("arguments"):
+                                    args = fn["arguments"]
+                                    if delta.get("encrypted"):
+                                        args = decrypt_chunk(args)
+                                    acc["arguments"] += args
+                            content_by_target["tool_call"] = render_tool_calls()
+                except json.JSONDecodeError:
+                    if not self.quiet_mode:
+                        print(
+                            f"\n\033[33mWARNING:\033[0m Could not parse JSON data: {json_data[:50]}..."
+                        )
+                    continue
+                except Exception as e:
+                    integrity_error = e
+                    content_by_target["_error"] = "integrity_error"
+                    content_by_target["_error_details"] = str(e)
+                    if not self.quiet_mode:
+                        print(
+                            "\n\033[31mINTEGRITY ERROR:\033[0m "
+                            f"Response decryption failed: {e}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                    try:
+                        response.close()
+                    except Exception:
+                        pass
+                    if raise_on_integrity_error:
+                        raise LumoIntegrityError(
+                            f"Response integrity verification failed: {e}"
+                        )
+                    break
 
         except LumoIntegrityError:
             # Integrity error occurred ensure it raised and accessible for lib users not swallowed
@@ -1557,6 +1692,7 @@ class pyLumo:
         file_path: str,
         tools: Optional[List[str]] = None,
         targets: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, str]:
         """Send a request with an attached file.
 
@@ -1565,6 +1701,7 @@ class pyLumo:
             file_path: Path to the file to upload
             tools: Optional list of tool names
             targets: Optional list of response targets
+            model: Model ID to use (see LumoModel); None defaults to "auto"
 
         Returns:
             Dictionary with response content by target
@@ -1576,7 +1713,7 @@ class pyLumo:
         combined_prompt = f"{prompt}\n\n{file_upload_str}"
 
         # Send the request with the combined prompt
-        return self.send_request(combined_prompt, tools, targets)
+        return self.send_request(combined_prompt, tools, targets, model=model)
 
 
 # Very Basic CLI
@@ -1610,6 +1747,12 @@ def main() -> None:
         nargs="+",
         default=["title", "message"],
         help="Targets for the response",
+    )
+    parser.add_argument(
+        "--model",
+        default="auto",
+        choices=["auto", "lumo-lite", "lumo-max", "apertus-15"],
+        help="Model to use (default: auto)",
     )
     parser.add_argument(
         "-q", "--quiet", action="store_true", help="Quiet mode (raw output only)"
@@ -1655,12 +1798,14 @@ def main() -> None:
             file_path=args.upload,
             tools=args.tools,
             targets=args.targets,
+            model=args.model,
         )
     else:
         client.send_request(
             prompt=prompt,
             tools=args.tools,
             targets=args.targets,
+            model=args.model,
         )
 
 

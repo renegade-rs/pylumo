@@ -1,5 +1,12 @@
 # pyLumo
 
+> **Fork notice:** this repository is a fork of
+> [Mindgard/pylumo](https://github.com/Mindgard/pylumo) by
+> [Mindgard](https://mindgard.ai), maintained by ReNegadeR
+> <rs@rhodium.dscloud.me>. Original authorship and the upstream project
+> remain credited to Mindgard; the project is licensed under
+> GPL-3.0-or-later.
+
 <p align="center">
   <img src="src/pylumo/_purp_cat.png" alt="pyLumo" width="400">
 </p>
@@ -33,7 +40,9 @@ A Python client and terminal UI for the [Proton Lumo](https://lumo.proton.me) AI
 
 ## Installation
 
-**Requirements:** Python 3.12+, GnuPG
+**Requirements:** Python 3.12+, GnuPG, and the `proton-auth` binary
+(0.2.0, from [Arsylk/proton-auth](https://github.com/Arsylk/proton-auth))
+for login/CAPTCHA delegation
 
 ### Quick Install (Recommended)
 
@@ -229,4 +238,5 @@ GPL-3.0-or-later
 - [Blogpost - Understanding Lumo AI Assistant: Announcing pyLumo](http://mindgard.ai/blog/understanding-lumo-ai-assistant-announcing-pylumo)
 - [Proton Lumo](https://lumo.proton.me)
 - [GitHub Repository](https://github.com/Mindgard/pylumo)
-- [Mindgard](https://mindgard.ai)
+- [Mindgard](https://mindgard.ai) (upstream of this fork)
+- [Arsylk/proton-auth](https://github.com/Arsylk/proton-auth) (external login/CAPTCHA solver, v0.2.0)
