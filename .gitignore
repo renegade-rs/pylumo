@@ -215,6 +215,4 @@ bin/proton-auth
 # OpenCode harness state
 .opencode/
 
-# ignore .github folder (matches at root and in any subfolder)
-.github/
 .opencode
