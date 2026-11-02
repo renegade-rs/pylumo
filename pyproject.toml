@@ -44,7 +44,7 @@ classifiers = [
 
 dependencies = [
     "keyring>=24.0.0",
-    "urllib3<2.0",
+    "urllib3<3.0",
     "requests>=2.31.0",
     "pycryptodome>=3.15.0",
     "pgpy>=0.6.0",
