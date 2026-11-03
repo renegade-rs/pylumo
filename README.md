@@ -331,6 +331,34 @@ wall-clock, decode tokens/s, prefill tokens/s), the served model catalog (highli
 CPU, memory, and GPU
 usage.
 
+### Run in Docker
+
+The server also runs in a portable Linux container. Secrets stay on the host:
+the gitignored `.env` (mode 0600) is injected at runtime via `env_file` or
+`--env-file` and never baked into the image.
+
+```bash
+# Build
+docker build -t pylumo:local .
+
+# Run (host port stays loopback-only; stop the launchd agent or set
+# PYLUMO_HOST_PORT if 8443 is taken)
+docker compose up -d
+
+# Stop
+docker compose down
+```
+
+Open [http://127.0.0.1:8443/](http://127.0.0.1:8443/) as usual. The container
+bind-mounts the host's `~/.local/share/pylumo`, so the persisted API key,
+logs and `gpu.json` are shared with a native install: paste the same key into
+both, and the monitor's GPU tile shows real host utilization (the macOS
+sampler writes the file the container reads). Without `LUMO_API_KEY` in
+`.env`, the server reads or generates the key in that shared directory. The
+proton session file (`~/.pylumo/session.json`) is not under it, so it does not
+survive container recreation. Keep `.env` LF-ended: CRLF smuggles a trailing
+`\r` into values.
+
 ## Python API
 
 ```python

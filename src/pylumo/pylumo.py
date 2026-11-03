@@ -385,9 +385,7 @@ class pyLumo:
 
     @staticmethod
     def _get_secure_app_dir() -> Path:
-        if sys.platform == "darwin":
-            base_dir = Path.home() / "Library" / "Application Support"
-        elif sys.platform == "win32":
+        if sys.platform == "win32":
             base_dir = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
         else:
             base_dir = Path.home() / ".local" / "share"

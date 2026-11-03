@@ -179,17 +179,14 @@ class PyLumoTUI(App):
         """Get secure application directory based on platform.
 
         Returns platform-appropriate directory:
-        - macOS: ~/Library/Application Support/pylumo
-        - Linux: ~/.local/share/pylumo
+        - Linux and macOS: ~/.local/share/pylumo
         - Windows: %APPDATA%/pylumo
         """
-        if sys.platform == "darwin":  # macOS
-            base_dir = Path.home() / "Library" / "Application Support"
-        elif sys.platform == "win32":  # Windows
+        if sys.platform == "win32":  # Windows
             base_dir = Path(
                 os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming")
             )
-        else:  # Linux and others
+        else:  # Linux, macOS and others
             base_dir = Path.home() / ".local" / "share"
 
         app_dir = base_dir / "pylumo"
