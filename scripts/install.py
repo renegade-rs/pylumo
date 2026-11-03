@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import os
+import re
 
 # Pinned proton-auth version: the Go module tag built by install_proton_auth().
 # Keep in sync with PROTON_AUTH_VERSION in src/pylumo/proton_auth.py.
@@ -87,6 +88,61 @@ User = _mod.User
     
     with open(srp_init_path, 'w') as f:
         f.write(patched_content)
+
+
+def _patch_proton_cert_pinning_for_urllib3() -> None:
+    """Patch proton's cert_pinning.py for urllib3 2.x compatibility.
+
+    urllib3 2.0 removed `strict` from HTTPSConnectionPool.__init__. The fork
+    subclasses it and calls the parent positionally, so under urllib3 2.x every
+    later argument shifts by one, landing `strict` in the parent `timeout` slot
+    (Timeout.from_float -> ValueError), which breaks Proton API auth at runtime.
+    Rewrite the call to pass by keyword and include `strict` only when the
+    parent signature accepts it (checked via inspect.signature).
+    """
+    site_packages = _get_site_packages_dir()
+    pin_path = os.path.join(site_packages, "proton", "cert_pinning.py")
+    if not os.path.exists(pin_path):
+        print(f"  Warning: Could not find {pin_path} to patch")
+        return
+    with open(pin_path, "r") as f:
+        content = f.read()
+    # Check if already patched
+    if "PATCHED FOR URLLIB3 v2" in content:
+        return
+    pattern = re.compile(
+        r"(self\.hash_dict = hash_dict[ \t]*\n)([ \t]*)#.*?except TypeError:.*?\n[ \t]*\)[ \t]*\n",
+        re.DOTALL,
+    )
+    replacement = (
+        r"\1\2# PATCHED FOR URLLIB3 v2: urllib3 2.0 removed `strict` from\n"
+        r"\2# HTTPSConnectionPool.__init__. The positional super() call then shifts\n"
+        r"\2# every later arg by one, landing `strict` in the parent `timeout` slot\n"
+        r"\2# (Timeout.from_float -> ValueError), breaking Proton auth on 2.x.\n"
+        r"\2# Pass by keyword; include `strict` only when the parent accepts it.\n"
+        r"\2_kw = dict(\n"
+        r"\2    host=host, port=port, timeout=timeout, maxsize=maxsize,\n"
+        r"\2    block=block, headers=headers, retries=retries,\n"
+        r"\2    _proxy=_proxy, _proxy_headers=_proxy_headers,\n"
+        r"\2    key_file=key_file, cert_file=cert_file, cert_reqs=cert_reqs,\n"
+        r"\2    key_password=key_password, ca_certs=ca_certs,\n"
+        r"\2    ssl_version=ssl_version, assert_hostname=assert_hostname,\n"
+        r"\2    assert_fingerprint=assert_fingerprint, ca_cert_dir=ca_cert_dir,\n"
+        r"\2    **conn_kw,\n"
+        r"\2)\n"
+        r'\2if "strict" in inspect.signature(HTTPSConnectionPool.__init__).parameters:\n'
+        r'\2    _kw["strict"] = strict\n'
+        r"\2super(TLSPinningHTTPSConnectionPool, self).__init__(**_kw)\n"
+    )
+    new_content, n = pattern.subn(replacement, content, count=1)
+    if n == 0:
+        print(f"  Warning: TLS-pinning pattern not found in {pin_path}; skipping")
+        return
+    # Insert `import inspect` (needed by the patched call) after `import base64`
+    if not re.search(r"^import inspect$", new_content, re.MULTILINE):
+        new_content = new_content.replace("import base64\n", "import base64\nimport inspect\n", 1)
+    with open(pin_path, "w") as f:
+        f.write(new_content)
 
 
 # Version declared by the pinned proton-python-client source
@@ -172,6 +228,10 @@ def install_proton_client(proton_ref: str, expected_commit: str | None) -> None:
         if sys.platform == 'darwin':
             print("[4/4] Patching proton SRP for macOS compatibility...")
             _patch_proton_srp_for_macos()
+
+        # Patch the installed TLS-pinning module for urllib3 2.x compatibility
+        print("[4/4] Patching proton TLS pinning for urllib3 compatibility...")
+        _patch_proton_cert_pinning_for_urllib3()
         
         print("[4/4] ✓ proton-client installed successfully\n")
 
