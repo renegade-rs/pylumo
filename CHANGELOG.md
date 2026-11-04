@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-11-04
 ### Added
 - API monitor page (`GET /` and `GET /monitor.js`, served without auth) modeled on
   the Strata monitor: per-request token usage and timings (time to first token,

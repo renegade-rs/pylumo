@@ -157,7 +157,7 @@ class AboutModal(ModalScreen):
         ("escape", "dismiss", "Close"),
     ]
 
-    def __init__(self, version: str = "0.0.1"):
+    def __init__(self, version: str = "0.1.0"):
         super().__init__()
         self.version = version
 
