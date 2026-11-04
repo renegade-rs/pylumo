@@ -44,16 +44,16 @@ classifiers = [
 
 dependencies = [
     "keyring>=24.0.0",
-    # Pin urllib3 to 1.x: the proton-python-client fork (installed by
-    # scripts/install.py) subclasses urllib3's HTTPSConnectionPool for TLS
+    # Allow urllib3 1.x or 2.x (<3.0). The proton-python-client fork (installed
+    # by scripts/install.py) subclasses urllib3's HTTPSConnectionPool for TLS
     # certificate pinning and passes per-connection SSL kwargs (strict,
     # ssl_version, ca_certs, cert_reqs, assert_fingerprint, ...) that urllib3
-    # 2.0 removed. Under urllib3 2.x constructing the pinning pool raises
-    # ValueError (Timeout.from_float on the DEFAULT_TIMEOUT sentinel), breaking
-    # Proton API auth at runtime. The test suite does not catch this (it mocks
-    # or skips the live pinning path), so do not relax this pin until the fork
-    # supports urllib3 2.x. See PR #6 / proton/cert_pinning.py.
-    "urllib3<2.0",
+    # 2.0 removed; under urllib3 2.x this raised ValueError (Timeout.from_float
+    # on the DEFAULT_TIMEOUT sentinel), breaking Proton API auth at runtime.
+    # _patch_proton_cert_pinning_for_urllib3() in scripts/install.py rewrites
+    # that subclass's super().__init__() call to keyword-based passing, making
+    # the pinning pool compatible with urllib3 2.x (see PR #11).
+    "urllib3<3.0",
     "requests>=2.31.0",
     "pycryptodome>=3.15.0",
     "pgpy>=0.6.0",
