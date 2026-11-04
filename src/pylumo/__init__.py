@@ -2,7 +2,7 @@
 pylumo - A Python client and TUI for the Lumo Proton API with hybrid encryption.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
 
 from pylumo.pylumo import (
     pyLumo,
