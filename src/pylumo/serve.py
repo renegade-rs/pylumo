@@ -2,7 +2,7 @@
 """
 pylumo-serve - A local OpenAI-compatible HTTP server backed by the Lumo API.
 
-Starts a loopback HTTP server that exposes the pyLumo client through the
+Starts an HTTP server that exposes the pyLumo client through the
 OpenAI chat completions API, compatible with any tool that speaks the
 OpenAI protocol (opencode, GitHub Copilot BYOK, Cursor, Continue, aider).
 
@@ -40,7 +40,7 @@ __all__ = [
     "main",
 ]
 
-DEFAULT_ADDR = "127.0.0.1:8443"
+DEFAULT_ADDR = "0.0.0.0:8443"
 API_KEY_FILE = "lumo-api-key"
 API_KEY_BYTES = 32
 
@@ -662,7 +662,7 @@ def main() -> None:
 
     Starts a local OpenAI-compatible server backed by the pyLumo client.
     The API key is resolved from the environment or the persisted key
-    file (never from argv), and the server listens on loopback by default.
+    file (never from argv), and the server listens on all interfaces by default.
     """
     addr_default = os.environ.get("LUMO_ENDPOINT") or DEFAULT_ADDR
     web_default = os.environ.get(
