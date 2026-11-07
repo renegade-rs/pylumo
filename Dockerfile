@@ -14,7 +14,7 @@ RUN groupadd --gid 10001 pylumo && \
     useradd --uid 10001 --gid 10001 --create-home --home-dir /home/pylumo pylumo \
     && mkdir -p /home/pylumo/.local/share \
     && chown pylumo:pylumo /home/pylumo/.local /home/pylumo/.local/share \
-    && chmod 700 /home/pylumo/.local /home/pylumo/.local/share \
+    && chmod 711 /home/pylumo/.local /home/pylumo/.local/share \
     && chmod 755 /home/pylumo
 ENV PATH="/app/.venv/bin:${PATH}"
 COPY --from=builder /app/.venv /app/.venv

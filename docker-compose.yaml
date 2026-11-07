@@ -11,6 +11,6 @@ services:
       HOME: /home/pylumo
     user: "${PYLUMO_UID-501}:${PYLUMO_GID-20}"
     ports:
-      - "127.0.0.1:${PYLUMO_HOST_PORT:-8443}:8443"
+      - "0.0.0.0:${PYLUMO_HOST_PORT:-8443}:8443"
     volumes:
       - ~/.local/share/pylumo:/home/pylumo/.local/share/pylumo
